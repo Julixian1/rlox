@@ -1,0 +1,17 @@
+// run in --line-by-line mode!!
+"aaa";
+123;
+"a" + "b";
+2 + 2;
+4 - 2;
+5 * 5;
+4 % 2;
+3 > 2;
+3 >= 3;
+3 == 3;
+"aa" == "aa";
+
+`; // error de scaneo
+1 +; // error de parseo
+"aaa" + 5; // error de ejecución
+"aaa" - "bbb"; // error de ejecución
