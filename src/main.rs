@@ -3,14 +3,19 @@ mod parser;
 mod scanner;
 mod stmt;
 mod token;
+mod environment;
+mod interpreter;
+mod value;
+mod function;
 
+use interpreter::Interpreter;
 use parser::Parser;
 use scanner::Scanner;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 
-fn run(source: String) {
+fn run(interpreter: &mut Interpreter, source: String) {
     let mut scanner = Scanner::new(source);
     let tokens = match scanner.scan_tokens() {
         Ok(t) => t,
@@ -21,25 +26,29 @@ fn run(source: String) {
     };
 
     let mut parser = Parser::new(tokens);
-    match parser.parse() {
-        Ok(statements) => {
-            for stmt in &statements {
-                println!("{:?}", stmt);
-            }
+    let statements = match parser.parse() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Parse Error:\n{}", e);
+            return;
         }
-        Err(e) => eprintln!("Parse Error:\n{}", e),
+    };
+
+    if let Err(e) = interpreter.interpret(&statements) {
+        eprintln!("Runtime Error: {}", e);
     }
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    let mut interpreter = Interpreter::new();
 
     if args.len() > 2 {
         println!("Uso: rlox [script]");
         std::process::exit(64);
     } else if args.len() == 2 {
         let source = fs::read_to_string(&args[1]).expect("No se puede leer el archivo.");
-        run(source);
+        run(&mut interpreter, source);
     } else {
         let stdin = io::stdin();
         let mut stdout = io::stdout();
@@ -57,7 +66,7 @@ fn main() {
                 continue;
             }
 
-            run(line);
+            run(&mut interpreter, line);
         }
     }
 }
