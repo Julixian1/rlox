@@ -48,6 +48,7 @@ pub enum TokenType {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[allow(dead_code)]
 pub enum Literal{
     String(String),
     Number(f64),
