@@ -1,21 +1,13 @@
-mod expr;
-mod parser;
-mod scanner;
-mod stmt;
-mod token;
-mod environment;
-mod interpreter;
-mod value;
-mod function;
-
-use interpreter::Interpreter;
-use parser::Parser;
-use scanner::Scanner;
+use rlox::interpreter::Interpreter;
+use rlox::parser::Parser;
+use rlox::resolver::Resolver;
+use rlox::scanner::Scanner;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 
 fn run(interpreter: &mut Interpreter, source: String) {
+
     let mut scanner = Scanner::new(source);
     let tokens = match scanner.scan_tokens() {
         Ok(t) => t,
@@ -33,6 +25,21 @@ fn run(interpreter: &mut Interpreter, source: String) {
             return;
         }
     };
+
+    let mut resolver = Resolver::new();
+    resolver.resolve_stmts(&statements);
+
+    if !resolver.errors.is_empty() {
+        for err in &resolver.errors {
+            eprintln!("{}", err);
+        }
+        return;
+    }
+
+    // Transfiere el mapa de profundidades al Interpreter.
+    for (ptr, depth) in resolver.locals {
+        interpreter.resolve(ptr, depth);
+    }
 
     if let Err(e) = interpreter.interpret(&statements) {
         eprintln!("Runtime Error: {}", e);
@@ -70,4 +77,3 @@ fn main() {
         }
     }
 }
-

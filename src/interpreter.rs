@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::environment::Environment;
@@ -9,14 +10,26 @@ use crate::value::Value;
 use crate::function::{LoxFunction, ReturnSignal};
 
 pub struct Interpreter {
+    pub globals: Rc<RefCell<Environment>>,
     environment: Rc<RefCell<Environment>>,
+    locals: HashMap<*const Expr, usize>,
 }
+
+unsafe impl Send for Interpreter {}
 
 impl Interpreter {
     pub fn new() -> Self {
+        let globals = Rc::new(RefCell::new(Environment::new()));
         Interpreter {
-            environment: Rc::new(RefCell::new(Environment::new())),
+            globals: globals.clone(),
+            environment: globals,
+            locals: HashMap::new(),
         }
+    }
+
+    /// Llamado por el Resolver para registrar la profundidad de un nodo Expr.
+    pub fn resolve(&mut self, expr: *const Expr, depth: usize) {
+        self.locals.insert(expr, depth);
     }
 
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), String> {
@@ -36,8 +49,44 @@ impl Interpreter {
     }
 
     pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, ReturnSignal> {
-        expr.accept(self)
-    }    
+        let ptr = expr as *const Expr;
+        match expr {
+            Expr::Variable { name } => {
+                self.lookup_variable(ptr, name)
+            }
+            Expr::Assign { name, value } => {
+                let val = self.evaluate(value)?;
+                if let Some(&depth) = self.locals.get(&ptr) {
+                    self.environment
+                        .borrow_mut()
+                        .assign_at(depth, &name.lexeme, val.clone())
+                        .map_err(ReturnSignal::Error)?;
+                } else {
+                    self.environment
+                        .borrow_mut()
+                        .assign(name, val.clone())
+                        .map_err(ReturnSignal::Error)?;
+                }
+                Ok(val)
+            }
+            _ => expr.accept(self),
+        }
+    }
+
+    // Busca una variable: usa `get_at` si hay profundidad resuelta, o busca en globals si es una variable global.
+    fn lookup_variable(&self, ptr: *const Expr, name: &Token) -> Result<Value, ReturnSignal> {
+        if let Some(&depth) = self.locals.get(&ptr) {
+            self.environment
+                .borrow()
+                .get_at(depth, &name.lexeme)
+                .map_err(ReturnSignal::Error)
+        } else {
+            self.globals
+                .borrow()
+                .get(name)
+                .map_err(ReturnSignal::Error)
+        }
+    }
 
     pub fn execute_block(
         &mut self,
@@ -146,12 +195,12 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
         &mut self,
         name: &Token,
         params: &[Token],
-        body: &[Stmt],
+        body: &Rc<Vec<Stmt>>,
     ) -> Result<(), ReturnSignal> {
         let function = LoxFunction::new(
             name.clone(),
             params.to_vec(),
-            body.to_vec(),
+            body.clone(),
             self.environment.clone(),
         );
         self.environment
@@ -186,14 +235,15 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
     }
 
     fn visit_variable_expr(&mut self, name: &Token) -> Result<Value, ReturnSignal> {
-        Ok(self.environment.borrow().get(name)?)
+        self.environment.borrow().get(name).map_err(ReturnSignal::Error)
     }
 
     fn visit_assign_expr(&mut self, name: &Token, value: &Expr) -> Result<Value, ReturnSignal> {
         let val = self.evaluate(value)?;
         self.environment
             .borrow_mut()
-            .assign(name, val.clone())?;
+            .assign(name, val.clone())
+            .map_err(ReturnSignal::Error)?;
         Ok(val)
     }
 
@@ -240,14 +290,14 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
                 ))),
             },
             TokenType::Minus => { self.num_binary_op(left_val, right_val, operator.line, |a, b| a - b)}
-            TokenType::Star => { self.num_binary_op(left_val, right_val, operator.line, |a, b| a * b)}
+            TokenType::Star  => { self.num_binary_op(left_val, right_val, operator.line, |a, b| a * b)}
             TokenType::Slash => { self.num_binary_op(left_val, right_val, operator.line, |a, b| a / b)}
-            TokenType::Greater => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a > b)}
+            TokenType::Greater      => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a > b)}
             TokenType::GreaterEqual => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a >= b)}
-            TokenType::Less => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a < b)}
-            TokenType::LessEqual => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a <= b)}
-            TokenType::EqualEqual => Ok(Value::Boolean(left_val == right_val)),
-            TokenType::BangEqual => Ok(Value::Boolean(left_val != right_val)),
+            TokenType::Less         => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a < b)}
+            TokenType::LessEqual    => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a <= b)}
+            TokenType::EqualEqual   => Ok(Value::Boolean(left_val == right_val)),
+            TokenType::BangEqual    => Ok(Value::Boolean(left_val != right_val)),
             TokenType::Percent => { self.num_binary_op(left_val, right_val, operator.line, |a, b| a % b)}
             _ => Err(ReturnSignal::Error(format!(
                 "[line {}] Invalid binary operator.",

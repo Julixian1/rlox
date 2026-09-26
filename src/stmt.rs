@@ -1,6 +1,8 @@
 use crate::expr::Expr;
 use crate::token::Token;
 
+use std::rc::Rc;
+
 pub trait StmtVisitor<R> {
     fn visit_expression_stmt(&mut self, expression: &Expr) -> R;
     fn visit_print_stmt(&mut self, expression: &Expr) -> R;
@@ -13,7 +15,7 @@ pub trait StmtVisitor<R> {
         else_branch: &Option<Box<Stmt>>,
     ) -> R;
     fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) -> R;
-    fn visit_function_stmt(&mut self, name: &Token, params: &[Token], body: &[Stmt]) -> R;
+    fn visit_function_stmt(&mut self, name: &Token, params: &[Token], body: &Rc<Vec<Stmt>>) -> R;
     fn visit_return_stmt(&mut self, keyword: &Token, value: &Option<Expr>) -> R;
 }
 
@@ -45,7 +47,7 @@ pub enum Stmt {
     Function {
         name: Token,
         params: Vec<Token>,
-        body: Vec<Stmt>,
+        body: Rc<Vec<Stmt>>,
     },
     Return {
         keyword: Token,

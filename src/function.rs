@@ -24,12 +24,12 @@ impl From<String> for ReturnSignal {
 pub struct LoxFunction {
     pub name: Token,
     pub params: Vec<Token>,
-    pub body: Vec<Stmt>,
+    pub body: Rc<Vec<Stmt>>,
     pub closure: Rc<RefCell<Environment>>, 
 }
 
 impl LoxFunction {
-    pub fn new(name: Token, params: Vec<Token>, body: Vec<Stmt>, closure: Rc<RefCell<Environment>>) -> Self {
+    pub fn new(name: Token, params: Vec<Token>, body: Rc<Vec<Stmt>>, closure: Rc<RefCell<Environment>>) -> Self {
         LoxFunction {
             name,
             params,

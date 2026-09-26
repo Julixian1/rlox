@@ -45,6 +45,38 @@ impl Environment {
         ))
     }
 
+    pub fn get_at(&self, depth: usize, name: &str) -> Result<Value, String> {
+        if depth == 0 {
+            return self.values.get(name).cloned().ok_or_else(|| {
+                format!("Error: Undefined variable '{}' at depth 0.", name)
+            });
+        }
+        match &self.enclosing {
+            Some(enclosing) => enclosing.borrow().get_at(depth - 1, name),
+            None => Err(format!(
+                "Error: Scope chain too shallow for variable '{}' (depth {}).",
+                name, depth
+            )),
+        }
+    }
+
+    pub fn assign_at(&mut self, depth: usize, name: &str, value: Value) -> Result<(), String> {
+        if depth == 0 {
+            if self.values.contains_key(name) {
+                self.values.insert(name.to_string(), value);
+                return Ok(());
+            }
+            return Err(format!("Error: Undefined variable '{}' at depth 0.", name));
+        }
+        match &self.enclosing {
+            Some(enclosing) => enclosing.borrow_mut().assign_at(depth - 1, name, value),
+            None => Err(format!(
+                "Error: Scope chain too shallow for variable '{}' (depth {}).",
+                name, depth
+            )),
+        }
+    }
+
     pub fn assign(&mut self, name: &Token, value: Value) -> Result<(), String> {
         if self.values.contains_key(&name.lexeme) {
             self.values.insert(name.lexeme.clone(), value);

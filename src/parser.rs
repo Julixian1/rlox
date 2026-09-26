@@ -145,7 +145,7 @@ impl Parser {
         self.consume(&TokenType::RightParen, "Expected ')' after parameters.")?;
         self.consume(&TokenType::LeftBrace, "Expected '{' before function body.")?;
 
-        let body = self.block()?;
+        let body = std::rc::Rc::new(self.block()?);
 
         Ok(Stmt::Function { name, params, body })
     }
