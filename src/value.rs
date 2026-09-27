@@ -12,6 +12,9 @@ pub enum Value {
 }
 
 impl Value {
+    /// Determina si un valor de Lox se evalúa como verdadero (truthy).
+    ///
+    /// En Lox, únicamente `nil` y `false` son falsos; todos los demás valores son verdaderos.
     pub fn is_truthy(&self) -> bool {
         match self {
             Value::Nil => false,
@@ -22,6 +25,7 @@ impl Value {
 }
 
 impl fmt::Display for Value {
+    /// Formatea el valor para su representación textual en salida estándar (ej. en `print`).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Number(n) => write!(f, "{}", n),
@@ -34,6 +38,7 @@ impl fmt::Display for Value {
 }
 
 impl From<&LiteralValue> for Value {
+    /// Convierte un `LiteralValue` del AST a un `Value` del entorno de ejecución.
     fn from(literal: &LiteralValue) -> Self {
         match literal {
             LiteralValue::Number(n) => Value::Number(*n),

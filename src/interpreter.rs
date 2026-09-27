@@ -18,6 +18,7 @@ pub struct Interpreter {
 unsafe impl Send for Interpreter {}
 
 impl Interpreter {
+    /// Crea un nuevo `Interpreter` inicializando los entornos globales e individuales.
     pub fn new() -> Self {
         let globals = Rc::new(RefCell::new(Environment::new()));
         Interpreter {
@@ -27,11 +28,12 @@ impl Interpreter {
         }
     }
 
-    /// Llamado por el Resolver para registrar la profundidad de un nodo Expr.
+    /// Llamado por el Resolver para registrar la profundidad de un nodo Expr en la pila de ámbitos.
     pub fn resolve(&mut self, expr: *const Expr, depth: usize) {
         self.locals.insert(expr, depth);
     }
 
+    /// Interpreta y ejecuta una secuencia de sentencias del programa Lox.
     pub fn interpret(&mut self, statements: &[Stmt]) -> Result<(), String> {
         for stmt in statements {
             if let Err(err) = self.execute(stmt) {
@@ -44,10 +46,12 @@ impl Interpreter {
         Ok(())
     }
 
+    /// Ejecuta una sentencia individual del AST delegando a `accept(self)`.
     pub fn execute(&mut self, stmt: &Stmt) -> Result<(), ReturnSignal> {
         stmt.accept(self)
     }
 
+    /// Evalúa un nodo de expresión del AST y devuelve su valor resultante (`Value`).
     pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, ReturnSignal> {
         let ptr = expr as *const Expr;
         match expr {
@@ -73,7 +77,7 @@ impl Interpreter {
         }
     }
 
-    // Busca una variable: usa `get_at` si hay profundidad resuelta, o busca en globals si es una variable global.
+    /// Busca una variable: usa `get_at` si la variable fue resuelta localmente a cierta profundidad, o busca en `globals`.
     fn lookup_variable(&self, ptr: *const Expr, name: &Token) -> Result<Value, ReturnSignal> {
         if let Some(&depth) = self.locals.get(&ptr) {
             self.environment
@@ -88,6 +92,7 @@ impl Interpreter {
         }
     }
 
+    /// Ejecuta un bloque de sentencias dentro del entorno (environment) proporcionado y restaura el entorno previo al finalizar.
     pub fn execute_block(
         &mut self,
         statements: &[Stmt],
@@ -108,6 +113,7 @@ impl Interpreter {
         result
     }
 
+    /// Auxiliar para aplicar operaciones binarias numéricas (ej. resta, multiplicación, división).
     fn num_binary_op(
         &self,
         left: Value,
@@ -121,6 +127,7 @@ impl Interpreter {
         }
     }
 
+    /// Auxiliar para aplicar comparaciones relacionales sobre números produciendo un `Value::Boolean`.
     fn num_bool_op(
         &self,
         left: Value,

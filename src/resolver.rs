@@ -22,6 +22,7 @@ pub struct Resolver {
 }
 
 impl Resolver {
+    /// Crea un nuevo `Resolver` con la pila de alcances vacía.
     pub fn new() -> Self {
         Resolver {
             scopes: Vec::new(),
@@ -31,14 +32,17 @@ impl Resolver {
         }
     }
 
+    /// Inicia un nuevo ámbito (scope) apilando un mapa de variables local.
     fn begin_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
 
+    /// Finaliza el ámbito (scope) actual desapilando el mapa de variables local superior.
     fn end_scope(&mut self) {
         self.scopes.pop();
     }
 
+    /// Declara una variable en el ámbito actual marcándola como aún no inicializada (`false`).
     fn declare(&mut self, name: &Token) {
         if let Some(scope) = self.scopes.last_mut() {
             if scope.contains_key(&name.lexeme) {
@@ -51,13 +55,14 @@ impl Resolver {
         }
     }
 
+    /// Define una variable en el ámbito actual marcándola como ya inicializada y lista para uso (`true`).
     fn define(&mut self, name: &Token) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.lexeme.clone(), true);
         }
     }
 
-    // Busca la variable de adentro hacia afuera y registra la profundidadusando el puntero al nodo `Expr` como clave.
+    /// Busca la variable de adentro hacia afuera (alcances internos a externos) y registra la distancia/profundidad en `locals`.
     fn resolve_local(&mut self, expr_ptr: *const Expr, name: &Token) {
         for (i, scope) in self.scopes.iter().rev().enumerate() {
             if scope.contains_key(&name.lexeme) {
@@ -68,7 +73,7 @@ impl Resolver {
         // No encontrada en ningún scope local → es global, no se registra.
     }
 
-    /// Resuelve el cuerpo de una función abriendo su propio scope.
+    /// Resuelve el cuerpo de una función abriendo su propio scope e inicializando sus parámetros.
     fn resolve_function(&mut self, params: &[Token], body: &[Stmt], fn_type: FunctionType) {
         let enclosing = self.current_function;
         self.current_function = fn_type;
@@ -84,17 +89,19 @@ impl Resolver {
         self.current_function = enclosing;
     }
 
+    /// Recorre y resuelve una lista de sentencias.
     pub fn resolve_stmts(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             self.resolve_stmt(stmt);
         }
     }
 
+    /// Resuelve una sentencia individual despachando el Visitor.
     fn resolve_stmt(&mut self, stmt: &Stmt) {
         stmt.accept(self);
     }
 
-    // Resuelve una expresión. Primero obtiene el puntero al nodo (para usarlo como clave en `locals`), luego delega al visitor correspondiente.
+    /// Resuelve una expresión registrando su puntero en el mapa de profundidades `locals`.
     pub fn resolve_expr(&mut self, expr: &Expr) {
         let ptr = expr as *const Expr;
         match expr {

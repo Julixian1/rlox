@@ -9,6 +9,7 @@ pub struct Scanner{
 }
 
 impl Scanner {
+    /// Crea un nuevo `Scanner` inicializado con la cadena de código fuente.
     pub fn new(source: String) -> Self{
         Scanner{
             source: source.chars().collect(),
@@ -19,6 +20,7 @@ impl Scanner {
         }
     }
 
+    /// Realiza el análisis léxico completo de la fuente y devuelve un `Vec<Token>` o un mensaje de error.
     pub fn scan_tokens(&mut self) -> Result<Vec<Token>,String>{
         while !self.is_at_end(){
             self.start = self.current;
@@ -35,10 +37,12 @@ impl Scanner {
         Ok(self.tokens.clone())
     }
 
+    /// Comprueba si el puntero actual de caracteres ha alcanzado el final de la fuente.
     fn is_at_end(&self) -> bool {
         self.current >= self.source.len()
     }
 
+    /// Retorna el carácter actual sin avanzar el puntero.
     fn peek(&self) -> char {
         if self.is_at_end() {
             return '\0';
@@ -46,16 +50,19 @@ impl Scanner {
         self.source[self.current]
     }
 
+    /// Avanza el puntero de caracteres en uno y retorna el carácter consumido.
     fn advance(&mut self) -> char {
         let c = self.peek();
         self.current += 1;
         c
     }
 
+    /// Retorna el carácter consumido anteriormente (`current - 1`).
     fn previous(&self) -> char {
         self.source[self.current - 1]
     }
 
+    /// Consume el carácter actual si coincide con `expected` y retorna `true`; de lo contrario `false`.
     fn match_char(&mut self, expected: char) -> bool {
         if self.is_at_end() || self.source[self.current] != expected {
             return false;
@@ -64,15 +71,18 @@ impl Scanner {
         true
     }
 
+    /// Obtiene la cadena de texto (lexema) correspondiente al rango actual `[start..current]`.
     fn lexeme(&self) -> String {
         self.source[self.start..self.current].iter().collect()
     }
 
+    /// Crea un nuevo `Token` del tipo especificado y lo añade a la lista de tokens escaneados.
     fn add_token(&mut self, token_type: TokenType, literal: Option<Literal>) {
         let text = self.lexeme();
         self.tokens.push(Token::new(token_type, text, literal, self.line));
     }
     
+    /// Escanea el siguiente token individual desde la posición actual del código fuente.
     fn scan_token(&mut self) -> Result<(), String> {
         let c = self.advance();
 

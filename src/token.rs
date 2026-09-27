@@ -65,6 +65,13 @@ pub struct Token{
 }
 
 impl Token {
+    /// Crea una nueva instancia de `Token`.
+    ///
+    /// # Parámetros
+    /// - `token_type`: El tipo del token.
+    /// - `lexeme`: El texto original que compone el token.
+    /// - `literal`: El valor literal evaluado (si aplica).
+    /// - `line`: Número de línea en el código fuente.
     pub fn new(token_type: TokenType, lexeme: String, literal: Option<Literal>, line: usize) -> Self {
         Token{
             token_type,
@@ -75,6 +82,7 @@ impl Token {
     }
 }
 
+/// Retorna el `TokenType` correspondiente si la cadena dada es una palabra clave reservada de Lox.
 pub fn get_keyword(keyword: &str) -> Option<TokenType>{
     match keyword {
         "and" => Some(TokenType::And),

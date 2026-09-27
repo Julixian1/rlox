@@ -12,6 +12,7 @@ pub struct Environment {
 }
 
 impl Environment {
+    /// Crea un nuevo entorno global (raíz) sin ningún entorno envolvente.
     pub fn new() -> Self {
         Environment {
             values: HashMap::new(),
@@ -19,6 +20,7 @@ impl Environment {
         }
     }
 
+    /// Crea un nuevo entorno local delimitado (enclosed) vinculado a un entorno padre.
     pub fn new_enclosed(enclosing: Rc<RefCell<Environment>>) -> Self {
         Environment {
             values: HashMap::new(),
@@ -26,10 +28,12 @@ impl Environment {
         }
     }
 
+    /// Define una nueva variable en el entorno actual asociando su nombre a un valor.
     pub fn define(&mut self, name: String, value: Value) {
         self.values.insert(name, value);
     }
 
+    /// Busca y obtiene el valor de una variable por su token en el entorno actual o en sus entornos padres.
     pub fn get(&self, name: &Token) -> Result<Value, String> {
         if let Some(value) = self.values.get(&name.lexeme) {
             return Ok(value.clone());
@@ -45,6 +49,7 @@ impl Environment {
         ))
     }
 
+    /// Busca y obtiene el valor de una variable dada una profundidad exacta (`depth`) en la cadena de alcances.
     pub fn get_at(&self, depth: usize, name: &str) -> Result<Value, String> {
         if depth == 0 {
             return self.values.get(name).cloned().ok_or_else(|| {
@@ -60,6 +65,7 @@ impl Environment {
         }
     }
 
+    /// Reasigna el valor de una variable existente a una profundidad exacta (`depth`) en la cadena de alcances.
     pub fn assign_at(&mut self, depth: usize, name: &str, value: Value) -> Result<(), String> {
         if depth == 0 {
             if self.values.contains_key(name) {
@@ -77,6 +83,7 @@ impl Environment {
         }
     }
 
+    /// Reasigna el valor de una variable existente en el entorno actual o en la cadena de entornos padres.
     pub fn assign(&mut self, name: &Token, value: Value) -> Result<(), String> {
         if self.values.contains_key(&name.lexeme) {
             self.values.insert(name.lexeme.clone(), value);

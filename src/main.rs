@@ -6,6 +6,10 @@ use std::env;
 use std::fs;
 use std::io::{self, Write};
 
+/// Ejecuta un fragmento o archivo de código fuente en Lox.
+///
+/// Escanea el código fuente a tokens, parsea a sentencias del AST,
+/// resuelve los alcances de variables locales y finalmente ejecuta el programa con el interprete.
 fn run(interpreter: &mut Interpreter, source: String) {
 
     let mut scanner = Scanner::new(source);
@@ -46,6 +50,11 @@ fn run(interpreter: &mut Interpreter, source: String) {
     }
 }
 
+/// Punto de entrada principal del ejecutable CLI de RLox.
+///
+/// Soporta dos modos:
+/// 1. Ejecución de un archivo de script (`rlox <script>`).
+/// 2. Modo interactivo REPL (`rlox`).
 fn main() {
     let args: Vec<String> = env::args().collect();
     let mut interpreter = Interpreter::new();

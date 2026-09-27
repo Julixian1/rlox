@@ -8,24 +8,29 @@ pub struct Parser {
 }
 
 impl Parser {
+    /// Crea un nuevo `Parser` recibiendo un vector de `Token`s escaneados.
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser { tokens, current: 0 }
     }
 
     // HELPERS
 
+    /// Retorna una referencia al token actual sin consumirlo.
     fn peek(&self) -> &Token {
         &self.tokens[self.current]
     }
 
+    /// Retorna una referencia al token consumido más recientemente.
     fn previous(&self) -> &Token {
         &self.tokens[self.current - 1]
     }
 
+    /// Comprueba si se ha alcanzado el token de fin de archivo (`TokenType::Eof`).
     fn is_at_end(&self) -> bool {
         self.peek().token_type == TokenType::Eof
     }
 
+    /// Consume el token actual y avanza el puntero, retornando el token previamente consumido.
     fn advance(&mut self) -> &Token {
         if !self.is_at_end() {
             self.current += 1;
@@ -33,6 +38,7 @@ impl Parser {
         self.previous()
     }
 
+    /// Verifica si el token actual coincide con el `TokenType` dado sin consumirlo.
     fn check(&self, token_type: &TokenType) -> bool {
         if self.is_at_end() {
             return false;
@@ -40,7 +46,7 @@ impl Parser {
         &self.peek().token_type == token_type
     }
 
-    // Avanza si el token actual coincide con alguno de los tipos dados.
+    /// Avanza si el token actual coincide con alguno de los tipos dados en `types`.
     fn match_token(&mut self, types: &[TokenType]) -> bool {
         for t in types {
             if self.check(t) {
@@ -51,7 +57,7 @@ impl Parser {
         false
     }
 
-    // Consume el token actual si coincide con el tipo esperado, o devuelve error.
+    /// Consume el token actual si coincide con el tipo esperado; de lo contrario, devuelve un error sintáctico con `message`.
     fn consume(&mut self, token_type: &TokenType, message: &str) -> Result<Token, String> {
         if self.check(token_type) {
             Ok(self.advance().clone())
@@ -61,7 +67,7 @@ impl Parser {
         }
     }
 
-    // PUNTO DE ENTRADA
+    /// Punto de entrada principal para el análisis sintáctico. Parsea la secuencia de tokens en una lista de sentencias (`Vec<Stmt>`).
     pub fn parse(&mut self) -> Result<Vec<Stmt>, String> {
         let mut statements: Vec<Stmt> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
@@ -83,7 +89,7 @@ impl Parser {
         }
     }
 
-    // Sincronización de pánico: avanza hasta el inicio del próximo statement.
+    /// Sincronización de pánico: avanza tokens ignorando errores hasta encontrar un punto seguro (límite de sentencia).
     fn synchronize(&mut self) {
         self.advance();
 
@@ -109,6 +115,7 @@ impl Parser {
 
     // DECLARATIONS
 
+    /// Parsea una declaración (función, variable o sentencia).
     fn declaration(&mut self) -> Result<Stmt, String> {
         if self.match_token(&[TokenType::Fun]) {
             return self.fun_declaration();
@@ -119,6 +126,7 @@ impl Parser {
         self.statement()
     }
 
+    /// Parsea una declaración de función (`fun nombre(params) { ... }`).
     fn fun_declaration(&mut self) -> Result<Stmt, String> {
         let name = self.consume(&TokenType::Identifier, "Expected function name.")?;
 
@@ -150,6 +158,7 @@ impl Parser {
         Ok(Stmt::Function { name, params, body })
     }
 
+    /// Parsea una declaración de variable (`var nombre = valor;`).
     fn var_declaration(&mut self) -> Result<Stmt, String> {
         let name = self.consume(&TokenType::Identifier, "Expected variable name.")?;
 
@@ -166,6 +175,7 @@ impl Parser {
 
     // STATEMENTS
 
+    /// Parsea una sentencia según la palabra clave inicial (print, bloque, if, while, for, return o expresión).
     fn statement(&mut self) -> Result<Stmt, String> {
         if self.match_token(&[TokenType::Print]) {
             return self.print_statement();
@@ -190,20 +200,21 @@ impl Parser {
         self.expression_statement()
     }
 
+    /// Parsea una sentencia de impresión (`print expr;`).
     fn print_statement(&mut self) -> Result<Stmt, String> {
         let expression = self.expression()?;
         self.consume(&TokenType::Semicolon, "Expected ';' after value.")?;
         Ok(Stmt::Print { expression })
     }
 
+    /// Parsea una sentencia de expresión (`expr;`).
     fn expression_statement(&mut self) -> Result<Stmt, String> {
         let expression = self.expression()?;
         self.consume(&TokenType::Semicolon, "Expected ';' after expression.")?;
         Ok(Stmt::Expression { expression })
     }
 
-    // Parsea el contenido de un bloque (asume que '{' ya fue consumido).
-    // Retorna las declaraciones internas (sin el nodo Block envolvente).
+    /// Parsea las declaraciones internas de un bloque de código delimitado por `{` y `}`.
     fn block(&mut self) -> Result<Vec<Stmt>, String> {
         let mut statements: Vec<Stmt> = Vec::new();
 
@@ -215,6 +226,7 @@ impl Parser {
         Ok(statements)
     }
 
+    /// Parsea una sentencia condicional `if (cond) then_branch else else_branch`.
     fn if_statement(&mut self) -> Result<Stmt, String> {
         self.consume(&TokenType::LeftParen, "Expected '(' after 'if'.")?;
         let condition = self.expression()?;
@@ -231,6 +243,7 @@ impl Parser {
         Ok(Stmt::If { condition, then_branch, else_branch })
     }
 
+    /// Parsea un bucle `while (cond) body`.
     fn while_statement(&mut self) -> Result<Stmt, String> {
         self.consume(&TokenType::LeftParen, "Expected '(' after 'while'.")?;
         let condition = self.expression()?;
@@ -241,7 +254,7 @@ impl Parser {
         Ok(Stmt::While { condition, body })
     }
 
-    // Desugaring: for → Block { initializer; While { condition; Block { body; increment } } }
+    /// Parsea un bucle `for (init; cond; inc) body` transformándolo (desugaring) en estructuras `While` y `Block`.
     fn for_statement(&mut self) -> Result<Stmt, String> {
         self.consume(&TokenType::LeftParen, "Expected '(' after 'for'.")?;
 
@@ -296,6 +309,7 @@ impl Parser {
         Ok(body)
     }
 
+    /// Parsea una sentencia de retorno (`return expr;`).
     fn return_statement(&mut self) -> Result<Stmt, String> {
         let keyword = self.previous().clone();
 
@@ -311,10 +325,13 @@ impl Parser {
     }
 
     // EXPRESSIONS (de menor a mayor precedencia)
+
+    /// Punto de entrada para parsear expresiones. Delega a `assignment`.
     fn expression(&mut self) -> Result<Expr, String> {
         self.assignment()
     }
 
+    /// Parsea expresiones de asignación (`var = expr`).
     fn assignment(&mut self) -> Result<Expr, String> {
         let expr = self.logic_or()?;
 
@@ -338,6 +355,7 @@ impl Parser {
         Ok(expr)
     }
 
+    /// Parsea expresiones lógicas `or`.
     fn logic_or(&mut self) -> Result<Expr, String> {
         let mut expr = self.logic_and()?;
 
@@ -354,6 +372,7 @@ impl Parser {
         Ok(expr)
     }
 
+    /// Parsea expresiones lógicas `and`.
     fn logic_and(&mut self) -> Result<Expr, String> {
         let mut expr = self.equality()?;
 
@@ -370,6 +389,7 @@ impl Parser {
         Ok(expr)
     }
 
+    /// Parsea operaciones de igualdad y desigualdad (`==`, `!=`).
     fn equality(&mut self) -> Result<Expr, String> {
         let mut expr = self.comparison()?;
 
@@ -386,6 +406,7 @@ impl Parser {
         Ok(expr)
     }
 
+    /// Parsea comparaciones de orden (`>`, `>=`, `<`, `<=`).
     fn comparison(&mut self) -> Result<Expr, String> {
         let mut expr = self.term()?;
 
@@ -407,6 +428,7 @@ impl Parser {
         Ok(expr)
     }
 
+    /// Parsea sumas y restas (`+`, `-`).
     fn term(&mut self) -> Result<Expr, String> {
         let mut expr = self.factor()?;
 
@@ -423,6 +445,7 @@ impl Parser {
         Ok(expr)
     }
 
+    /// Parsea multiplicaciones, divisiones y módulos (`*`, `/`, `%`).
     fn factor(&mut self) -> Result<Expr, String> {
         let mut expr = self.unary()?;
 
@@ -439,6 +462,7 @@ impl Parser {
         Ok(expr)
     }
 
+    /// Parsea operadores unarios (`!`, `-`).
     fn unary(&mut self) -> Result<Expr, String> {
         if self.match_token(&[TokenType::Bang, TokenType::Minus]) {
             let operator = self.previous().clone();
@@ -452,6 +476,7 @@ impl Parser {
         self.call()
     }
 
+    /// Parsea llamadas a función (`callee(args...)`).
     fn call(&mut self) -> Result<Expr, String> {
         let mut expr = self.primary()?;
 
@@ -466,6 +491,7 @@ impl Parser {
         Ok(expr)
     }
 
+    /// Auxiliar para parsear la lista de argumentos de una llamada a función.
     fn finish_call(&mut self, callee: Expr) -> Result<Expr, String> {
         let mut arguments: Vec<Expr> = Vec::new();
 
@@ -495,6 +521,7 @@ impl Parser {
         })
     }
 
+    /// Parsea expresiones primarias: literales (booleanos, números, cadenas, nil), identificadores de variables o paréntesis.
     fn primary(&mut self) -> Result<Expr, String> {
         // Literales booleanos y nil
         if self.match_token(&[TokenType::False]) {

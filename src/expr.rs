@@ -1,14 +1,23 @@
 use std::fmt;
 use crate::token::Token;
 
+/// Trait patrón Visitor para recorrer y procesar expresiones del AST.
 pub trait ExprVisitor<R> {
+    /// Procesa una expresión literal.
     fn visit_literal_expr(&mut self, value: &LiteralValue) -> R;
+    /// Procesa una expresión unaria (ej. `-x`, `!y`).
     fn visit_unary_expr(&mut self, operator: &Token, right: &Expr) -> R;
+    /// Procesa una expresión binaria (ej. `a + b`, `x == y`).
     fn visit_binary_expr(&mut self, left: &Expr, operator: &Token, right: &Expr) -> R;
+    /// Procesa una expresión agrupada entre paréntesis `(expr)`.
     fn visit_grouping_expr(&mut self, expression: &Expr) -> R;
+    /// Procesa el acceso a una variable por su identificador.
     fn visit_variable_expr(&mut self, name: &Token) -> R;
+    /// Procesa una asignación de variable (`x = expr`).
     fn visit_assign_expr(&mut self, name: &Token, value: &Expr) -> R;
+    /// Procesa una expresión lógica de cortocircuito (`or`, `and`).
     fn visit_logical_expr(&mut self, left: &Expr, operator: &Token, right: &Expr) -> R;
+    /// Procesa una llamada a función (`fun_name(arg1, arg2)`).
     fn visit_call_expr(&mut self, callee: &Expr, paren: &Token, arguments: &[Expr]) -> R;
 }
 
@@ -22,6 +31,7 @@ pub enum LiteralValue {
 }
 
 impl fmt::Display for LiteralValue {
+    /// Formatea el valor literal a una representación en cadena de caracteres.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LiteralValue::Number(n) => write!(f, "{}", n),
@@ -70,6 +80,7 @@ pub enum Expr {
 }
 
 impl Expr {
+    /// Acepta un visitante implementando el patrón Visitor para despachar el método `visit_*` correspondiente según el tipo de nodo expresión.
     pub fn accept<R>(&self, visitor: &mut impl ExprVisitor<R>) -> R {
         match self {
             Expr::Literal { value } => visitor.visit_literal_expr(value),
@@ -85,6 +96,7 @@ impl Expr {
 }
 
 impl fmt::Display for Expr {
+    /// Formatea el árbol de expresiones a formato prefijo (S-expressions) para inspección y depuración.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Expr::Literal { value } => write!(f, "{}", value),
