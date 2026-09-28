@@ -1,0 +1,34 @@
+fun crear_interes(tasa) {
+    fun aplicar_interes(saldo) {
+        return saldo + saldo * tasa;
+    }
+
+    return aplicar_interes;
+}
+
+fun alcanza_objetivo(saldo, objetivo) {
+    if (saldo >= objetivo) {
+        return true;
+    }
+
+    return false;
+}
+
+var saldo = 500;
+var objetivo = 700;
+var meses = 0;
+var aplicar_interes = crear_interes(0.02);
+
+while (meses < 12) {
+    saldo = aplicar_interes(saldo);
+    meses = meses + 1;
+}
+
+print "Saldo despues de 12 meses:";
+print saldo;
+
+if (alcanza_objetivo(saldo, objetivo)) {
+    print "Objetivo alcanzado";
+} else {
+    print "Objetivo no alcanzado";
+}

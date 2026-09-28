@@ -1,0 +1,7 @@
+var i = 0;
+var str = "";
+while (i < 5000) {
+    str = str + "a";
+    i = i + 1;
+}
+print str;
