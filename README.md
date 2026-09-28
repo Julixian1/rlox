@@ -17,13 +17,14 @@ archivo o REPL
     -> Vec<Token>
     -> Parser
     -> Vec<Stmt> / AST
+    -> Resolver
     -> Interpreter
     -> Value
 ```
 
 El scanner conserva lexema, literal y línea. El parser recursivo descendente
 construye expresiones y statements separados en `expr.rs` y `stmt.rs`. El
-intérprete recorre esas estructuras mediante visitors y produce valores o
+resolver recorre el AST mediante un pase estático para asociar cada variable local con su profundidad de alcance exacta y detectar errores semánticos en tiempo de compilación/pre-ejecución. El intérprete recorre esas estructuras mediante visitors y produce valores o
 errores de runtime.
 
 ## Distribución de responsabilidades
@@ -36,6 +37,7 @@ errores de runtime.
 | `src/parser.rs` | Parser, precedencia y recuperación ante errores |
 | `src/expr.rs` | AST de expresiones y visitor de expresiones |
 | `src/stmt.rs` | AST de statements y visitor de statements |
+| `src/resolver.rs` | Resolución de alcances estáticos (binding de variables) y errores semánticos |
 | `src/interpreter.rs` | Evaluación, control de flujo y operaciones |
 | `src/environment.rs` | Variables y cadena de ambientes |
 | `src/function.rs` | Funciones, argumentos, retornos y cierres |
@@ -59,6 +61,12 @@ etapa de manera localizada.
 operación de evaluación. Esta separación evita mezclar semántica con la
 representación del AST y deja abierta la posibilidad de agregar otro visitor. A cambio, cada nuevo nodo exige actualizar el trait y
 sus implementaciones.
+
+### Resolver y resolución estática de variables
+
+Se incorporó un pase previo de resolución de alcances (`src/resolver.rs`) mediante el patrón Visitor antes de interpretar:
+- **Binding estático de variables (*Lexical Scoping*):** Asocia cada nodo de expresión de variable/asignación (`*const Expr`) con la cantidad exacta de niveles de ambiente (`depth`) que deben subirse para encontrar la declaración. Esto permite que el `Interpreter` acceda a variables locales con `get_at` / `assign_at`, garantizando el comportamiento correcto de cierres (*closures*) y evitando errores de *shadowing* estático.
+- **Chequeos semánticos estáticos:** Detecta errores en tiempo de resolución antes de evaluar el programa, como el intento de usar una sentencia `return` fuera de una función (top-level) o leer una variable dentro de su propio inicializador (`var a = a;`).
 
 ### Ambientes enlazados con `Rc<RefCell<Environment>>`
 
@@ -173,8 +181,8 @@ A diferencia de la prueba de recursión (`fib.lox`), en la ejecución de bucles 
 
 Esta prueba evalúa la eficiencia en la manipulación de texto y la asignación dinámica de memoria en el *heap* mediante un bucle de $20.000$ concatenaciones de cadenas.
 
-| Implementación | Tiempo Medio (`mean ± σ`) | Rendimiento Relativo |
-| :--- | :--- | :--- |
+| Implementación | Tiempo Medio (`mean ± σ`) |
+| :--- | :--- |
 | **`rlox` (Tree-Walk)** | **3.7 ms** ± 0.6 ms | 
 | **Python 3** | **17.0 ms** ± 3.1 ms | 
 
