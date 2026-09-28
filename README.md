@@ -196,6 +196,44 @@ En operaciones de manipulación intensiva de texto, `rlox` superó a Python 3, s
 * **Sobrecarga de Inmutabilidad en Python:** Las cadenas en Python (CPython) son estrictamente inmutables a nivel de lenguaje. Aunque CPython cuenta con optimizaciones internas en la instrucción `in-place` (`+=`), el runtime aún incurre en sobrecarga verificando recuentos de referencias (*reference counting*) para determinar si la cadena se puede modificar en el lugar o si debe clonar el objeto en cada iteración.
 * **Ausencia de Garbage Collection Dinámico:** Mientras que Python mantiene un recolector de basura activo con control de referencias por cada asignación intermedia de texto, Rust destruye las instancias temporales del Heap de forma determinista mediante las reglas de ownership (propiedad) sin intervención de un Collector en tiempo de ejecución.
 
+### Benchmark 4: Bucles anidados contra `plox` (`quad-loops.lox`)
+
+Para comparar `rlox` con otra implementación del mismo lenguaje, se ejecutó el
+programa `examples/quad-loops.lox` utilizando `rlox` y `plox`, la implementación
+de Lox provista por la cátedra. 
+
+La comparación se realizó desde el directorio que contiene los repositorios
+`rlox` y `plox`, utilizando el intérprete de Python del entorno virtual de
+`plox` directamente, sin incluir el costo de iniciar `uv`:
+
+```bash
+hyperfine --warmup 5 \
+  './rlox/target/release/rlox ./rlox/examples/quad-loops.lox' \
+  'PYTHONPATH=plox ./plox/.venv/bin/python -m plox ./rlox/examples/quad-loops.lox'
+```
+
+Resultados obtenidos:
+
+| Implementación | Tecnología / Arquitectura | Tiempo Medio (`mean ± σ`) | Rango (`min … max`) | Rendimiento Relativo |
+| :--- | :--- | :--- | :--- | :--- |
+| **`rlox`** | Rust (Tree-Walk / `--release`) | **28.1 ms** ± 3.7 ms | 23.1 ms … 45.2 ms | **1.0x** (Base más rápida) |
+| **`plox`** | Python 3 (Tree-Walk) | **1673.0 ms** ± 54.0 ms | 1567.0 ms … 1752.0 ms | **~59.4x** más lento |
+
+Según Hyperfine, `rlox` fue aproximadamente **59 veces más rápido** que `plox` en esta ejecución. La diferencia podria venir por:
+* **Código nativo frente a interpretación sobre otro intérprete:**
+  `rlox` está implementado en Rust y se compila en modo `--release`. Por lo tanto, el código del intérprete que recorre y evalúa el AST se ejecuta como código nativo optimizado por LLVM.
+
+  `plox`, en cambio, está implementado en Python. La máquina virtual de CPython ejecuta el código Python que recorre y evalúa el AST de Lox. Esto agrega el costo del bytecode de Python, sus objetos dinámicos y sus operaciones de despacho.
+
+* **Operaciones y representación de valores:**
+  En `rlox`, las expresiones, sentencias y valores se representan mediante estructuras y `enum` de Rust. Las operaciones numéricas se realizan sobre valores nativos del intérprete, y el compilador puede optimizar parte de estas operaciones.
+
+  En `plox`, las operaciones se realizan mediante objetos dinámicos de Python. Durante las iteraciones, esto puede implicar creación de objetos temporales, despacho dinámico y actualización de los contadores de referencias de CPython.
+
+* **Despacho del Visitor:**
+  Ambas implementaciones utilizan el patrón Visitor para recorrer el AST. En `rlox`, este recorrido es ejecutado por código nativo y el compilador puede optimizar las llamadas y las estructuras estáticas de Rust. En `plox`, cada visita se ejecuta dentro de Python y utiliza los mecanismos dinámicos de métodos y objetos propios de ese lenguaje.
+
+
 ## Pruebas y Tests
 
 El proyecto cuenta con dos niveles de verificación de correcto funcionamiento:
@@ -211,8 +249,74 @@ El proyecto cuenta con dos niveles de verificación de correcto funcionamiento:
 2. **Pruebas integrales de la cátedra (`./tests.sh`)**:
    Ejecuta scripts Lox en `real-tests/` evaluando el comportamiento completo del ejecutable.
 
+## Uso real: simulador de ahorro
+
+Además de las pruebas automáticas, `rlox` puede ejecutar programas con un objetivo
+concreto. El archivo `examples/ahorro.lox` simula la evolución de un ahorro durante
+12 meses y determina si alcanza un objetivo definido por el usuario.
+
+```lox
+fun crear_interes(tasa) {
+  fun aplicar_interes(saldo) {
+    return saldo + saldo * tasa;
+  }
+
+  return aplicar_interes;
+}
+
+fun alcanza_objetivo(saldo, objetivo) {
+  if (saldo >= objetivo) {
+    return true;
+  }
+
+  return false;
+}
+
+var saldo = 500;
+var objetivo = 700;
+var meses = 0;
+var aplicar_interes = crear_interes(0.02);
+
+while (meses < 12) {
+  saldo = aplicar_interes(saldo);
+  meses = meses + 1;
+}
+
+print "Saldo despues de 12 meses:";
+print saldo;
+
+if (alcanza_objetivo(saldo, objetivo)) {
+  print "Objetivo alcanzado";
+} else {
+  print "Objetivo no alcanzado";
+}
+```
+
+El programa se ejecuta desde la raíz del proyecto con:
+
+```bash
+cargo run -- examples/ahorro.lox
+```
+
+La salida es similar a:
+
+```text
+Saldo despues de 12 meses:
+634.1208972812726
+Objetivo no alcanzado
+```
+
+Este ejemplo muestra que el lenguaje puede expresar un pequeño programa completo,
+no solamente evaluar expresiones aisladas. En particular, combina variables y
+asignaciones, operaciones aritméticas, funciones con parámetros y retorno,
+condicionales y un bucle `while`. También demuestra una característica importante
+de la semántica de Lox: `crear_interes` devuelve la función interna
+`aplicar_interes`, que conserva el valor de `tasa` de su entorno de declaración.
+Esto constituye un *closure* y permite aplicar el mismo interés en cada iteración
+del programa.
+
 ## Limitaciones de esta versión
 
 - no hay compilador ni VM de bytecode;
 - no hay clases, instancias ni herencia;
-- no hay funcionalidad extra más allá del conjunto base implementado.
+- no hay funcionalidad extra más allá del conjunto base implementado.
