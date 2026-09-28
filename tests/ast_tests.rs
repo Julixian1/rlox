@@ -4,7 +4,10 @@ use rlox::token::{Token, TokenType};
 #[test]
 fn test_literal_value_display() {
     assert_eq!(format!("{}", LiteralValue::Number(3.14)), "3.14");
-    assert_eq!(format!("{}", LiteralValue::StringVal("test".to_string())), "\"test\"");
+    assert_eq!(
+        format!("{}", LiteralValue::StringVal("test".to_string())),
+        "\"test\""
+    );
     assert_eq!(format!("{}", LiteralValue::Bool(true)), "true");
     assert_eq!(format!("{}", LiteralValue::Nil), "nil");
 }

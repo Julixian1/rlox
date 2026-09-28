@@ -28,12 +28,17 @@ pub struct LoxFunction {
     pub name: Token,
     pub params: Vec<Token>,
     pub body: Rc<Vec<Stmt>>,
-    pub closure: Rc<RefCell<Environment>>, 
+    pub closure: Rc<RefCell<Environment>>,
 }
 
 impl LoxFunction {
     /// Crea una nueva instancia de función de Lox asociada a su entorno de clausura.
-    pub fn new(name: Token, params: Vec<Token>, body: Rc<Vec<Stmt>>, closure: Rc<RefCell<Environment>>) -> Self {
+    pub fn new(
+        name: Token,
+        params: Vec<Token>,
+        body: Rc<Vec<Stmt>>,
+        closure: Rc<RefCell<Environment>>,
+    ) -> Self {
         LoxFunction {
             name,
             params,
@@ -53,8 +58,14 @@ impl LoxFunction {
     }
 
     /// Invoca la función pasando los argumentos correspondientes y ejecutando el cuerpo dentro de un nuevo entorno cerrado (closure).
-    pub fn call(&self, interpreter: &mut Interpreter, arguments: Vec<Value>) -> Result<Value, ReturnSignal> {
-        let environment = Rc::new(RefCell::new(Environment::new_enclosed(self.closure.clone())));
+    pub fn call(
+        &self,
+        interpreter: &mut Interpreter,
+        arguments: Vec<Value>,
+    ) -> Result<Value, ReturnSignal> {
+        let environment = Rc::new(RefCell::new(Environment::new_enclosed(
+            self.closure.clone(),
+        )));
 
         for (param, arg) in self.params.iter().zip(arguments) {
             environment.borrow_mut().define(param.lexeme.clone(), arg);

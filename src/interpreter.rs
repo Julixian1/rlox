@@ -4,10 +4,10 @@ use std::rc::Rc;
 
 use crate::environment::Environment;
 use crate::expr::{Expr, ExprVisitor, LiteralValue};
+use crate::function::{LoxFunction, ReturnSignal};
 use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::{Token, TokenType};
 use crate::value::Value;
-use crate::function::{LoxFunction, ReturnSignal};
 
 pub struct Interpreter {
     pub globals: Rc<RefCell<Environment>>,
@@ -39,7 +39,9 @@ impl Interpreter {
             if let Err(err) = self.execute(stmt) {
                 return match err {
                     ReturnSignal::Error(msg) => Err(msg),
-                    ReturnSignal::Return(_) => Err("Cannot return from top-level code.".to_string()),
+                    ReturnSignal::Return(_) => {
+                        Err("Cannot return from top-level code.".to_string())
+                    }
                 };
             }
         }
@@ -55,9 +57,7 @@ impl Interpreter {
     pub fn evaluate(&mut self, expr: &Expr) -> Result<Value, ReturnSignal> {
         let ptr = expr as *const Expr;
         match expr {
-            Expr::Variable { name } => {
-                self.lookup_variable(ptr, name)
-            }
+            Expr::Variable { name } => self.lookup_variable(ptr, name),
             Expr::Assign { name, value } => {
                 let val = self.evaluate(value)?;
                 if let Some(&depth) = self.locals.get(&ptr) {
@@ -85,10 +85,7 @@ impl Interpreter {
                 .get_at(depth, &name.lexeme)
                 .map_err(ReturnSignal::Error)
         } else {
-            self.globals
-                .borrow()
-                .get(name)
-                .map_err(ReturnSignal::Error)
+            self.globals.borrow().get(name).map_err(ReturnSignal::Error)
         }
     }
 
@@ -123,7 +120,10 @@ impl Interpreter {
     ) -> Result<Value, ReturnSignal> {
         match (left, right) {
             (Value::Number(l), Value::Number(r)) => Ok(Value::Number(op(l, r))),
-            _ => Err(ReturnSignal::Error(format!("[line {}] Operands must be numbers.", line))),
+            _ => Err(ReturnSignal::Error(format!(
+                "[line {}] Operands must be numbers.",
+                line
+            ))),
         }
     }
 
@@ -137,11 +137,13 @@ impl Interpreter {
     ) -> Result<Value, ReturnSignal> {
         match (left, right) {
             (Value::Number(l), Value::Number(r)) => Ok(Value::Boolean(op(l, r))),
-            _ => Err(ReturnSignal::Error(format!("[line {}] Operands must be numbers.", line))),
+            _ => Err(ReturnSignal::Error(format!(
+                "[line {}] Operands must be numbers.",
+                line
+            ))),
         }
     }
 }
-
 
 impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
     fn visit_expression_stmt(&mut self, expression: &Expr) -> Result<(), ReturnSignal> {
@@ -231,7 +233,6 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
     }
 }
 
-
 impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
     fn visit_literal_expr(&mut self, value: &LiteralValue) -> Result<Value, ReturnSignal> {
         Ok(Value::from(value))
@@ -242,7 +243,10 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
     }
 
     fn visit_variable_expr(&mut self, name: &Token) -> Result<Value, ReturnSignal> {
-        self.environment.borrow().get(name).map_err(ReturnSignal::Error)
+        self.environment
+            .borrow()
+            .get(name)
+            .map_err(ReturnSignal::Error)
     }
 
     fn visit_assign_expr(&mut self, name: &Token, value: &Expr) -> Result<Value, ReturnSignal> {
@@ -254,11 +258,7 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
         Ok(val)
     }
 
-    fn visit_unary_expr(
-        &mut self,
-        operator: &Token,
-        right: &Expr,
-    ) -> Result<Value, ReturnSignal> {
+    fn visit_unary_expr(&mut self, operator: &Token, right: &Expr) -> Result<Value, ReturnSignal> {
         let right_val = self.evaluate(right)?;
         match operator.token_type {
             TokenType::Minus => match right_val {
@@ -288,24 +288,34 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
         match operator.token_type {
             TokenType::Plus => match (left_val, right_val) {
                 (Value::Number(l), Value::Number(r)) => Ok(Value::Number(l + r)),
-                (Value::String(l), Value::String(r)) => {
-                    Ok(Value::String(format!("{}{}", l, r)))
-                }
+                (Value::String(l), Value::String(r)) => Ok(Value::String(format!("{}{}", l, r))),
                 _ => Err(ReturnSignal::Error(format!(
                     "[line {}] Operands must be two numbers or two strings.",
                     operator.line
                 ))),
             },
-            TokenType::Minus => { self.num_binary_op(left_val, right_val, operator.line, |a, b| a - b)}
-            TokenType::Star  => { self.num_binary_op(left_val, right_val, operator.line, |a, b| a * b)}
-            TokenType::Slash => { self.num_binary_op(left_val, right_val, operator.line, |a, b| a / b)}
-            TokenType::Greater      => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a > b)}
-            TokenType::GreaterEqual => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a >= b)}
-            TokenType::Less         => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a < b)}
-            TokenType::LessEqual    => { self.num_bool_op(left_val, right_val, operator.line, |a, b| a <= b)}
-            TokenType::EqualEqual   => Ok(Value::Boolean(left_val == right_val)),
-            TokenType::BangEqual    => Ok(Value::Boolean(left_val != right_val)),
-            TokenType::Percent => { self.num_binary_op(left_val, right_val, operator.line, |a, b| a % b)}
+            TokenType::Minus => {
+                self.num_binary_op(left_val, right_val, operator.line, |a, b| a - b)
+            }
+            TokenType::Star => self.num_binary_op(left_val, right_val, operator.line, |a, b| a * b),
+            TokenType::Slash => {
+                self.num_binary_op(left_val, right_val, operator.line, |a, b| a / b)
+            }
+            TokenType::Greater => {
+                self.num_bool_op(left_val, right_val, operator.line, |a, b| a > b)
+            }
+            TokenType::GreaterEqual => {
+                self.num_bool_op(left_val, right_val, operator.line, |a, b| a >= b)
+            }
+            TokenType::Less => self.num_bool_op(left_val, right_val, operator.line, |a, b| a < b),
+            TokenType::LessEqual => {
+                self.num_bool_op(left_val, right_val, operator.line, |a, b| a <= b)
+            }
+            TokenType::EqualEqual => Ok(Value::Boolean(left_val == right_val)),
+            TokenType::BangEqual => Ok(Value::Boolean(left_val != right_val)),
+            TokenType::Percent => {
+                self.num_binary_op(left_val, right_val, operator.line, |a, b| a % b)
+            }
             _ => Err(ReturnSignal::Error(format!(
                 "[line {}] Invalid binary operator.",
                 operator.line

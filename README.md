@@ -41,6 +41,7 @@ errores de runtime.
 | `src/function.rs` | Funciones, argumentos, retornos y cierres |
 | `src/value.rs` | Valores de runtime y truthiness |
 | `real-tests/` | Programas de prueba de la cátedra |
+| `tests/` | Pruebas unitarias e integración (Scanner, Parser, AST, Resolver e Interpreter) |
 | `examples/` | Ejemplos y casos exploratorios |
 
 ## Decisiones de diseño
@@ -195,9 +196,23 @@ En operaciones de manipulación intensiva de texto, `rlox` superó a Python 3, s
 * **Sobrecarga de Inmutabilidad en Python:** Las cadenas en Python (CPython) son estrictamente inmutables a nivel de lenguaje. Aunque CPython cuenta con optimizaciones internas en la instrucción `in-place` (`+=`), el runtime aún incurre en sobrecarga verificando recuentos de referencias (*reference counting*) para determinar si la cadena se puede modificar en el lugar o si debe clonar el objeto en cada iteración.
 * **Ausencia de Garbage Collection Dinámico:** Mientras que Python mantiene un recolector de basura activo con control de referencias por cada asignación intermedia de texto, Rust destruye las instancias temporales del Heap de forma determinista mediante las reglas de ownership (propiedad) sin intervención de un Collector en tiempo de ejecución.
 
+## Pruebas y Tests
+
+El proyecto cuenta con dos niveles de verificación de correcto funcionamiento:
+
+1. **Pruebas unitarias e integración de Rust (`cargo test`)**:
+   Ubicadas en la carpeta `tests/`, prueban los 5 componentes principales del sistema de forma independiente:
+   - `scanner_tests.rs`: Reconocimiento de tokens, palabras clave y literales.
+   - `parser_tests.rs`: Construcción del AST y gestión de precedencias.
+   - `ast_tests.rs`: Formateo e impresión de expresiones (S-expressions).
+   - `resolver_tests.rs`: Análisis semántico y alcance estático de variables.
+   - `interpreter_tests.rs`: Evaluación de expresiones, ejecuciones de control de flujo y funciones/closures.
+
+2. **Pruebas integrales de la cátedra (`./tests.sh`)**:
+   Ejecuta scripts Lox en `real-tests/` evaluando el comportamiento completo del ejecutable.
+
 ## Limitaciones de esta versión
 
 - no hay compilador ni VM de bytecode;
 - no hay clases, instancias ni herencia;
-- no hay funcionalidad extra más allá del conjunto base implementado;
-- no hay tests unitarios Rust;
+- no hay funcionalidad extra más allá del conjunto base implementado.

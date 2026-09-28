@@ -1,6 +1,6 @@
-use std::fmt;
 use crate::expr::LiteralValue;
 use crate::function::LoxFunction;
+use std::fmt;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
@@ -8,7 +8,7 @@ pub enum Value {
     String(String),
     Boolean(bool),
     Nil,
-    Function(LoxFunction),    
+    Function(LoxFunction),
 }
 
 impl Value {

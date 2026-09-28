@@ -1,5 +1,5 @@
-use std::fmt;
 use crate::token::Token;
+use std::fmt;
 
 /// Trait patrón Visitor para recorrer y procesar expresiones del AST.
 pub trait ExprVisitor<R> {
@@ -85,12 +85,24 @@ impl Expr {
         match self {
             Expr::Literal { value } => visitor.visit_literal_expr(value),
             Expr::Unary { operator, right } => visitor.visit_unary_expr(operator, right),
-            Expr::Binary { left, operator, right } => visitor.visit_binary_expr(left, operator, right),
+            Expr::Binary {
+                left,
+                operator,
+                right,
+            } => visitor.visit_binary_expr(left, operator, right),
             Expr::Grouping { expression } => visitor.visit_grouping_expr(expression),
             Expr::Variable { name } => visitor.visit_variable_expr(name),
             Expr::Assign { name, value } => visitor.visit_assign_expr(name, value),
-            Expr::Logical { left, operator, right } => visitor.visit_logical_expr(left, operator, right),
-            Expr::Call { callee, paren, arguments } => visitor.visit_call_expr(callee, paren, &arguments),
+            Expr::Logical {
+                left,
+                operator,
+                right,
+            } => visitor.visit_logical_expr(left, operator, right),
+            Expr::Call {
+                callee,
+                paren,
+                arguments,
+            } => visitor.visit_call_expr(callee, paren, &arguments),
         }
     }
 }
@@ -103,7 +115,11 @@ impl fmt::Display for Expr {
             Expr::Unary { operator, right } => {
                 write!(f, "({} {})", operator.lexeme, right)
             }
-            Expr::Binary { left, operator, right } => {
+            Expr::Binary {
+                left,
+                operator,
+                right,
+            } => {
                 write!(f, "({} {} {})", operator.lexeme, left, right)
             }
             Expr::Grouping { expression } => {
@@ -113,10 +129,16 @@ impl fmt::Display for Expr {
             Expr::Assign { name, value } => {
                 write!(f, "(= {} {})", name.lexeme, value)
             }
-            Expr::Logical { left, operator, right } => {
+            Expr::Logical {
+                left,
+                operator,
+                right,
+            } => {
                 write!(f, "({} {} {})", operator.lexeme, left, right)
             }
-            Expr::Call { callee, arguments, .. } => {
+            Expr::Call {
+                callee, arguments, ..
+            } => {
                 write!(f, "(call {}", callee)?;
                 for arg in arguments {
                     write!(f, " {}", arg)?;

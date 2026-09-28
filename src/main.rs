@@ -11,7 +11,6 @@ use std::io::{self, Write};
 /// Escanea el código fuente a tokens, parsea a sentencias del AST,
 /// resuelve los alcances de variables locales y finalmente ejecuta el programa con el interprete.
 fn run(interpreter: &mut Interpreter, source: String) {
-
     let mut scanner = Scanner::new(source);
     let tokens = match scanner.scan_tokens() {
         Ok(t) => t,

@@ -124,7 +124,9 @@ impl Resolver {
                 self.resolve_expr(left);
                 self.resolve_expr(right);
             }
-            Expr::Call { callee, arguments, .. } => {
+            Expr::Call {
+                callee, arguments, ..
+            } => {
                 self.resolve_expr(callee);
                 for arg in arguments {
                     self.resolve_expr(arg);
@@ -133,8 +135,7 @@ impl Resolver {
             Expr::Grouping { expression } => {
                 self.resolve_expr(expression);
             }
-            Expr::Literal { .. } => {
-            }
+            Expr::Literal { .. } => {}
             Expr::Logical { left, right, .. } => {
                 self.resolve_expr(left);
                 self.resolve_expr(right);
@@ -145,7 +146,6 @@ impl Resolver {
         }
     }
 }
-
 
 impl StmtVisitor<()> for Resolver {
     fn visit_block_stmt(&mut self, statements: &[Stmt]) {
@@ -162,7 +162,12 @@ impl StmtVisitor<()> for Resolver {
         self.define(name);
     }
 
-    fn visit_function_stmt(&mut self, name: &Token, params: &[Token], body: &std::rc::Rc<Vec<Stmt>>) {
+    fn visit_function_stmt(
+        &mut self,
+        name: &Token,
+        params: &[Token],
+        body: &std::rc::Rc<Vec<Stmt>>,
+    ) {
         self.declare(name);
         self.define(name);
         self.resolve_function(params, body, FunctionType::Function);
@@ -219,8 +224,7 @@ impl ExprVisitor<()> for Resolver {
     fn visit_grouping_expr(&mut self, expression: &Expr) {
         self.resolve_expr(expression);
     }
-    fn visit_variable_expr(&mut self, _name: &Token) {
-    }
+    fn visit_variable_expr(&mut self, _name: &Token) {}
     fn visit_assign_expr(&mut self, _name: &Token, value: &Expr) {
         self.resolve_expr(value);
     }

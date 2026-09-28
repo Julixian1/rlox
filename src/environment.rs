@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::token::Token;
-use crate::value::Value; 
+use crate::value::Value;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Environment {
@@ -52,9 +52,11 @@ impl Environment {
     /// Busca y obtiene el valor de una variable dada una profundidad exacta (`depth`) en la cadena de alcances.
     pub fn get_at(&self, depth: usize, name: &str) -> Result<Value, String> {
         if depth == 0 {
-            return self.values.get(name).cloned().ok_or_else(|| {
-                format!("Error: Undefined variable '{}' at depth 0.", name)
-            });
+            return self
+                .values
+                .get(name)
+                .cloned()
+                .ok_or_else(|| format!("Error: Undefined variable '{}' at depth 0.", name));
         }
         match &self.enclosing {
             Some(enclosing) => enclosing.borrow().get_at(depth - 1, name),

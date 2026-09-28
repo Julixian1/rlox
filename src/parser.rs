@@ -1,6 +1,6 @@
 use crate::expr::{Expr, LiteralValue};
 use crate::stmt::Stmt;
-use crate::token::{Token, TokenType, Literal};
+use crate::token::{Literal, Token, TokenType};
 
 pub struct Parser {
     tokens: Vec<Token>,
@@ -63,7 +63,10 @@ impl Parser {
             Ok(self.advance().clone())
         } else {
             let token = self.peek().clone();
-            Err(format!("[line {}] Error at '{}': {}", token.line, token.lexeme, message))
+            Err(format!(
+                "[line {}] Error at '{}': {}",
+                token.line, token.lexeme, message
+            ))
         }
     }
 
@@ -168,7 +171,10 @@ impl Parser {
             None
         };
 
-        self.consume(&TokenType::Semicolon, "Expected ';' after variable declaration.")?;
+        self.consume(
+            &TokenType::Semicolon,
+            "Expected ';' after variable declaration.",
+        )?;
 
         Ok(Stmt::Var { name, initializer })
     }
@@ -240,14 +246,21 @@ impl Parser {
             None
         };
 
-        Ok(Stmt::If { condition, then_branch, else_branch })
+        Ok(Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        })
     }
 
     /// Parsea un bucle `while (cond) body`.
     fn while_statement(&mut self) -> Result<Stmt, String> {
         self.consume(&TokenType::LeftParen, "Expected '(' after 'while'.")?;
         let condition = self.expression()?;
-        self.consume(&TokenType::RightParen, "Expected ')' after while condition.")?;
+        self.consume(
+            &TokenType::RightParen,
+            "Expected ')' after while condition.",
+        )?;
 
         let body = Box::new(self.statement()?);
 
@@ -271,7 +284,9 @@ impl Parser {
         let condition = if !self.check(&TokenType::Semicolon) {
             self.expression()?
         } else {
-            Expr::Literal { value: LiteralValue::Bool(true) }
+            Expr::Literal {
+                value: LiteralValue::Bool(true),
+            }
         };
         self.consume(&TokenType::Semicolon, "Expected ';' after loop condition.")?;
 
@@ -525,41 +540,61 @@ impl Parser {
     fn primary(&mut self) -> Result<Expr, String> {
         // Literales booleanos y nil
         if self.match_token(&[TokenType::False]) {
-            return Ok(Expr::Literal { value: LiteralValue::Bool(false) });
+            return Ok(Expr::Literal {
+                value: LiteralValue::Bool(false),
+            });
         }
         if self.match_token(&[TokenType::True]) {
-            return Ok(Expr::Literal { value: LiteralValue::Bool(true) });
+            return Ok(Expr::Literal {
+                value: LiteralValue::Bool(true),
+            });
         }
         if self.match_token(&[TokenType::Nil]) {
-            return Ok(Expr::Literal { value: LiteralValue::Nil });
+            return Ok(Expr::Literal {
+                value: LiteralValue::Nil,
+            });
         }
 
         // Literales numéricos y strings
         if self.match_token(&[TokenType::Number]) {
             let token = self.previous().clone();
             if let Some(Literal::Number(n)) = token.literal {
-                return Ok(Expr::Literal { value: LiteralValue::Number(n) });
+                return Ok(Expr::Literal {
+                    value: LiteralValue::Number(n),
+                });
             }
-            return Err(format!("[line {}] Error: Invalid number literal.", token.line));
+            return Err(format!(
+                "[line {}] Error: Invalid number literal.",
+                token.line
+            ));
         }
         if self.match_token(&[TokenType::String]) {
             let token = self.previous().clone();
             if let Some(Literal::String(s)) = token.literal {
-                return Ok(Expr::Literal { value: LiteralValue::StringVal(s) });
+                return Ok(Expr::Literal {
+                    value: LiteralValue::StringVal(s),
+                });
             }
-            return Err(format!("[line {}] Error: Invalid string literal.", token.line));
+            return Err(format!(
+                "[line {}] Error: Invalid string literal.",
+                token.line
+            ));
         }
 
         // Identificadores
         if self.match_token(&[TokenType::Identifier]) {
-            return Ok(Expr::Variable { name: self.previous().clone() });
+            return Ok(Expr::Variable {
+                name: self.previous().clone(),
+            });
         }
 
         // Agrupamiento
         if self.match_token(&[TokenType::LeftParen]) {
             let expr = self.expression()?;
             self.consume(&TokenType::RightParen, "Expected ')' after expression.")?;
-            return Ok(Expr::Grouping { expression: Box::new(expr) });
+            return Ok(Expr::Grouping {
+                expression: Box::new(expr),
+            });
         }
 
         // Error: token inesperado

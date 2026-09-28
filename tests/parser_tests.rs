@@ -1,7 +1,7 @@
+use rlox::expr::{Expr, LiteralValue};
 use rlox::parser::Parser;
 use rlox::scanner::Scanner;
 use rlox::stmt::Stmt;
-use rlox::expr::{Expr, LiteralValue};
 
 fn parse_source(source: &str) -> Result<Vec<Stmt>, String> {
     let mut scanner = Scanner::new(source.to_string());
@@ -16,9 +16,15 @@ fn test_parse_expression_statement() {
     assert_eq!(stmts.len(), 1);
     match &stmts[0] {
         Stmt::Expression { expression } => match expression {
-            Expr::Binary { left, operator, right } => {
+            Expr::Binary {
+                left,
+                operator,
+                right,
+            } => {
                 assert_eq!(operator.lexeme, "+");
-                assert!(matches!(**left, Expr::Literal { value: LiteralValue::Number(n) } if n == 1.0));
+                assert!(
+                    matches!(**left, Expr::Literal { value: LiteralValue::Number(n) } if n == 1.0)
+                );
                 assert!(matches!(**right, Expr::Binary { .. }));
             }
             _ => panic!("Expected Binary expression"),
@@ -49,11 +55,18 @@ fn test_parse_if_else_statement() {
     let stmts = parse_source("if (x > 0) print true; else print false;").unwrap();
     assert_eq!(stmts.len(), 1);
     match &stmts[0] {
-        Stmt::If { condition, then_branch, else_branch } => {
+        Stmt::If {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
             assert!(matches!(condition, Expr::Binary { .. }));
             assert!(matches!(**then_branch, Stmt::Print { .. }));
             assert!(else_branch.is_some());
-            assert!(matches!(**else_branch.as_ref().unwrap(), Stmt::Print { .. }));
+            assert!(matches!(
+                **else_branch.as_ref().unwrap(),
+                Stmt::Print { .. }
+            ));
         }
         _ => panic!("Expected If statement"),
     }

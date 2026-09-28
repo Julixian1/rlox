@@ -1,5 +1,5 @@
 #[derive(Debug, Clone, PartialEq)]
-pub enum TokenType { 
+pub enum TokenType {
     LeftParen,
     RightParen,
     LeftBrace,
@@ -49,7 +49,7 @@ pub enum TokenType {
 
 #[derive(Debug, Clone, PartialEq)]
 #[allow(dead_code)]
-pub enum Literal{
+pub enum Literal {
     String(String),
     Number(f64),
     Boolean(bool),
@@ -57,7 +57,7 @@ pub enum Literal{
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Token{
+pub struct Token {
     pub token_type: TokenType,
     pub lexeme: String,
     pub literal: Option<Literal>,
@@ -72,8 +72,13 @@ impl Token {
     /// - `lexeme`: El texto original que compone el token.
     /// - `literal`: El valor literal evaluado (si aplica).
     /// - `line`: Número de línea en el código fuente.
-    pub fn new(token_type: TokenType, lexeme: String, literal: Option<Literal>, line: usize) -> Self {
-        Token{
+    pub fn new(
+        token_type: TokenType,
+        lexeme: String,
+        literal: Option<Literal>,
+        line: usize,
+    ) -> Self {
+        Token {
             token_type,
             lexeme,
             literal,
@@ -83,7 +88,7 @@ impl Token {
 }
 
 /// Retorna el `TokenType` correspondiente si la cadena dada es una palabra clave reservada de Lox.
-pub fn get_keyword(keyword: &str) -> Option<TokenType>{
+pub fn get_keyword(keyword: &str) -> Option<TokenType> {
     match keyword {
         "and" => Some(TokenType::And),
         "else" => Some(TokenType::Else),
