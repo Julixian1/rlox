@@ -26,3 +26,7 @@ pub mod vm;
 pub mod compiler;
 
 pub mod chunk;
+
+pub mod closure;
+
+pub mod checker;

@@ -1,3 +1,4 @@
+use rlox::checker;
 use rlox::compiler;
 use rlox::interpreter::Interpreter;
 use rlox::parser::Parser;
@@ -16,13 +17,15 @@ enum Backend {
 
 impl Backend {
     fn run(&mut self, source: String) {
-        let (statements, resolver) = match parse_and_resolve(source) {
-            Some(res) => res,
-            None => return, 
+        let statements = match parse_and_check(source) {
+            Some(statements) => statements,
+            None => return,
         };
 
         match self {
             Backend::TreeWalk(interpreter) => {
+                let mut resolver = Resolver::new();
+                resolver.resolve_stmts(&statements);
                 for (ptr, depth) in resolver.locals {
                     interpreter.resolve(ptr, depth);
                 }
@@ -32,8 +35,8 @@ impl Backend {
                 }
             }
             Backend::Bytecode(vm) => {
-                let chunk = match compiler::compile(&statements) {
-                    Ok(c) => c,
+                let script = match compiler::compile(&statements) {
+                    Ok(s) => s,
                     Err(e) => {
                         eprintln!("Compile Error: {}", e);
                         return;
@@ -41,10 +44,10 @@ impl Backend {
                 };
 
                 if env::var_os("RLOX_DISASSEMBLE").is_some() {
-                    eprint!("{}", chunk.disassemble("script"));
+                    eprint!("{}", script.chunk.disassemble("script"));
                 }
 
-                if let Err(e) = vm.interpret(&chunk) {
+                if let Err(e) = vm.interpret(script) {
                     eprintln!("Runtime Error: {}", e);
                 }
             }
@@ -52,7 +55,7 @@ impl Backend {
     }
 }
 
-fn parse_and_resolve(source: String) -> Option<(Vec<Stmt>, Resolver)> {
+fn parse_and_check(source: String) -> Option<Vec<Stmt>> {
     let mut scanner = Scanner::new(source);
     let tokens = match scanner.scan_tokens() {
         Ok(t) => t,
@@ -71,17 +74,15 @@ fn parse_and_resolve(source: String) -> Option<(Vec<Stmt>, Resolver)> {
         }
     };
 
-    let mut resolver = Resolver::new();
-    resolver.resolve_stmts(&statements);
-
-    if !resolver.errors.is_empty() {
-        for err in &resolver.errors {
+    let errors = checker::check(&statements);
+    if !errors.is_empty() {
+        for err in &errors {
             eprintln!("{}", err);
         }
         return None;
     }
 
-    Some((statements, resolver))
+    Some(statements)
 }
 
 fn main() {
