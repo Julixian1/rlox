@@ -1,8 +1,6 @@
-// Representación del bytecode: instrucciones, constantes e información de líneas.
- 
 use crate::value::Value;
 use std::fmt;
- 
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
     // Literales
@@ -15,9 +13,9 @@ pub enum OpCode {
     Pop,
  
     // Variables
-    GetLocal(u16), // slot relativo al inicio del frame
+    GetLocal(u16), 
     SetLocal(u16),
-    GetGlobal(u16), // índice de la constante con el nombre
+    GetGlobal(u16),
     DefineGlobal(u16),
     SetGlobal(u16),
  
@@ -29,18 +27,25 @@ pub enum OpCode {
     Subtract,
     Multiply,
     Divide,
+    Modulo,
     Not,
     Negate,
  
     // Sentencias y control de flujo
     Print,
     Jump(u16),        
-    JumpIfFalse(u16), 
+    JumpIfFalse(u16),
     Loop(u16),        
  
     // Funciones
     Call(u8), // cantidad de argumentos
     Return,
+ 
+    // Closures
+    Closure(u16), 
+    GetUpvalue(u16),
+    SetUpvalue(u16),
+    CloseUpvalue,
 }
  
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -89,8 +94,8 @@ impl Chunk {
         Ok(())
     }
  
-    /// Emite un `Loop` que vuelve a `loop_start`.
     pub fn emit_loop(&mut self, loop_start: usize, line: usize) -> Result<(), ()> {
+        // +1 porque `ip` ya avanzó más allá del propio `Loop` al ejecutarlo.
         let offset = self.code.len() - loop_start + 1;
         let offset = u16::try_from(offset).map_err(|_| ())?;
         self.write(OpCode::Loop(offset), line);
@@ -102,6 +107,12 @@ impl Chunk {
         for offset in 0..self.code.len() {
             out.push_str(&self.disassemble_instruction(offset));
             out.push('\n');
+        }
+        for constant in &self.constants {
+            if let Value::Proto(proto) = constant {
+                out.push('\n');
+                out.push_str(&proto.chunk.disassemble(&proto.to_string()));
+            }
         }
         out
     }
@@ -120,7 +131,22 @@ impl Chunk {
             | OpCode::SetGlobal(i) => {
                 format!("{:<14} {:4} '{}'", name_of(&op), i, self.constants[i as usize])
             }
-            OpCode::GetLocal(s) | OpCode::SetLocal(s) => format!("{:<14} {:4}", name_of(&op), s),
+            OpCode::GetLocal(s)
+            | OpCode::SetLocal(s)
+            | OpCode::GetUpvalue(s)
+            | OpCode::SetUpvalue(s) => format!("{:<14} {:4}", name_of(&op), s),
+            OpCode::Closure(i) => {
+                let value = &self.constants[i as usize];
+                let mut text = format!("{:<14} {:4} '{}'", name_of(&op), i, value);
+                // Qué captura la función: una línea por upvalue.
+                if let Value::Proto(proto) = value {
+                    for up in &proto.upvalues {
+                        let kind = if up.is_local { "local" } else { "upvalue" };
+                        text.push_str(&format!("\n | {kind} {}", up.index));
+                    }
+                }
+                text
+            }
             OpCode::Jump(o) | OpCode::JumpIfFalse(o) => {
                 format!("{:<14} {:4} -> {}", name_of(&op), o, offset + 1 + o as usize)
             }
@@ -153,6 +179,7 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::Subtract => "OP_SUBTRACT",
         OpCode::Multiply => "OP_MULTIPLY",
         OpCode::Divide => "OP_DIVIDE",
+        OpCode::Modulo => "OP_MODULO",
         OpCode::Not => "OP_NOT",
         OpCode::Negate => "OP_NEGATE",
         OpCode::Print => "OP_PRINT",
@@ -161,6 +188,10 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::Loop(_) => "OP_LOOP",
         OpCode::Call(_) => "OP_CALL",
         OpCode::Return => "OP_RETURN",
+        OpCode::Closure(_) => "OP_CLOSURE",
+        OpCode::GetUpvalue(_) => "OP_GET_UPVALUE",
+        OpCode::SetUpvalue(_) => "OP_SET_UPVALUE",
+        OpCode::CloseUpvalue => "OP_CLOSE_UPVALUE",
     }
 }
  
@@ -169,3 +200,4 @@ impl fmt::Display for Chunk {
         write!(f, "{}", self.disassemble("chunk"))
     }
 }
+ 
