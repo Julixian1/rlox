@@ -1,22 +1,67 @@
+use rlox::checker;
+use rlox::compiler;
 use rlox::interpreter::Interpreter;
 use rlox::parser::Parser;
 use rlox::resolver::Resolver;
 use rlox::scanner::Scanner;
+use rlox::stmt::Stmt;
+use rlox::vm::Vm;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 
-/// Ejecuta un fragmento o archivo de código fuente en Lox.
-///
-/// Escanea el código fuente a tokens, parsea a sentencias del AST,
-/// resuelve los alcances de variables locales y finalmente ejecuta el programa con el interprete.
-fn run(interpreter: &mut Interpreter, source: String) {
+enum Backend {
+    TreeWalk(Interpreter),
+    Bytecode(Vm<io::Stdout>),
+}
+
+impl Backend {
+    fn run(&mut self, source: String) {
+        let statements = match parse_and_check(source) {
+            Some(statements) => statements,
+            None => return,
+        };
+
+        match self {
+            Backend::TreeWalk(interpreter) => {
+                let mut resolver = Resolver::new();
+                resolver.resolve_stmts(&statements);
+                for (ptr, depth) in resolver.locals {
+                    interpreter.resolve(ptr, depth);
+                }
+
+                if let Err(e) = interpreter.interpret(&statements) {
+                    eprintln!("Runtime Error: {}", e);
+                }
+            }
+            Backend::Bytecode(vm) => {
+                let script = match compiler::compile(&statements) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Compile Error: {}", e);
+                        return;
+                    }
+                };
+
+                if env::var_os("RLOX_DISASSEMBLE").is_some() {
+                    eprint!("{}", script.chunk.disassemble("script"));
+                }
+
+                if let Err(e) = vm.interpret(script) {
+                    eprintln!("Runtime Error: {}", e);
+                }
+            }
+        }
+    }
+}
+
+fn parse_and_check(source: String) -> Option<Vec<Stmt>> {
     let mut scanner = Scanner::new(source);
     let tokens = match scanner.scan_tokens() {
         Ok(t) => t,
         Err(e) => {
             eprintln!("Scanning Error: {}", e);
-            return;
+            return None;
         }
     };
 
@@ -25,45 +70,36 @@ fn run(interpreter: &mut Interpreter, source: String) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("Parse Error:\n{}", e);
-            return;
+            return None;
         }
     };
 
-    let mut resolver = Resolver::new();
-    resolver.resolve_stmts(&statements);
-
-    if !resolver.errors.is_empty() {
-        for err in &resolver.errors {
+    let errors = checker::check(&statements);
+    if !errors.is_empty() {
+        for err in &errors {
             eprintln!("{}", err);
         }
-        return;
+        return None;
     }
 
-    // Transfiere el mapa de profundidades al Interpreter.
-    for (ptr, depth) in resolver.locals {
-        interpreter.resolve(ptr, depth);
-    }
-
-    if let Err(e) = interpreter.interpret(&statements) {
-        eprintln!("Runtime Error: {}", e);
-    }
+    Some(statements)
 }
 
-/// Punto de entrada principal del ejecutable CLI de RLox.
-///
-/// Soporta dos modos:
-/// 1. Ejecución de un archivo de script (`rlox <script>`).
-/// 2. Modo interactivo REPL (`rlox`).
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let mut interpreter = Interpreter::new();
+    let use_vm = env::args().skip(1).any(|a| a == "--vm");
+    let args: Vec<String> = env::args().filter(|a| a != "--vm").collect();
+    let mut backend = if use_vm {
+        Backend::Bytecode(Vm::new())
+    } else {
+        Backend::TreeWalk(Interpreter::new())
+    };
 
     if args.len() > 2 {
-        println!("Uso: rlox [script]");
+        println!("Uso: rlox [--vm] [script]");
         std::process::exit(64);
     } else if args.len() == 2 {
         let source = fs::read_to_string(&args[1]).expect("No se puede leer el archivo.");
-        run(&mut interpreter, source);
+        backend.run(source);
     } else {
         let stdin = io::stdin();
         let mut stdout = io::stdout();
@@ -81,7 +117,7 @@ fn main() {
                 continue;
             }
 
-            run(&mut interpreter, line);
+            backend.run(line);
         }
     }
 }

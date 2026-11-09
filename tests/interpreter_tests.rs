@@ -1,3 +1,4 @@
+use rlox::checker;
 use rlox::interpreter::Interpreter;
 use rlox::parser::Parser;
 use rlox::resolver::Resolver;
@@ -9,12 +10,13 @@ fn execute_source(interpreter: &mut Interpreter, source: &str) -> Result<(), Str
     let mut parser = Parser::new(tokens);
     let statements = parser.parse()?;
 
+    let errors = checker::check(&statements);
+    if !errors.is_empty() {
+        return Err(errors.join("\n"));
+    }
+
     let mut resolver = Resolver::new();
     resolver.resolve_stmts(&statements);
-
-    if !resolver.errors.is_empty() {
-        return Err(resolver.errors.join("\n"));
-    }
 
     for (ptr, depth) in resolver.locals {
         interpreter.resolve(ptr, depth);

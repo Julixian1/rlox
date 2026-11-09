@@ -1,7 +1,9 @@
+use crate::closure::{Closure, FnProto};
 use crate::expr::LiteralValue;
 use crate::function::LoxFunction;
 use std::fmt;
-
+use std::rc::Rc;
+ 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Number(f64),
@@ -9,8 +11,10 @@ pub enum Value {
     Boolean(bool),
     Nil,
     Function(LoxFunction),
+    Proto(Rc<FnProto>),
+    Closure(Rc<Closure>),
 }
-
+ 
 impl Value {
     /// Determina si un valor de Lox se evalúa como verdadero (truthy).
     ///
@@ -23,7 +27,7 @@ impl Value {
         }
     }
 }
-
+ 
 impl fmt::Display for Value {
     /// Formatea el valor para su representación textual en salida estándar (ej. en `print`).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -33,10 +37,12 @@ impl fmt::Display for Value {
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Nil => write!(f, "nil"),
             Value::Function(func) => write!(f, "<fn {}>", func.name()),
+            Value::Proto(proto) => write!(f, "{}", proto),
+            Value::Closure(closure) => write!(f, "{}", closure),
         }
     }
 }
-
+ 
 impl From<&LiteralValue> for Value {
     /// Convierte un `LiteralValue` del AST a un `Value` del entorno de ejecución.
     fn from(literal: &LiteralValue) -> Self {
@@ -48,3 +54,4 @@ impl From<&LiteralValue> for Value {
         }
     }
 }
+ 
