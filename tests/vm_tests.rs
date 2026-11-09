@@ -877,214 +877,255 @@ fn test_vm_bound_methods_compared_by_identity() {
 }
 
 // ---------------------------------------------------------------------------
-// Métodos, this e inicializadores (Etapa 4)
+// Herencia y super (Etapa 5)
 // ---------------------------------------------------------------------------
 
 #[test]
-fn test_vm_method_declaration_and_invocation() {
+fn test_vm_simple_inheritance() {
     let source = "
-    class Greeter {
-        greet() {
-            print \"hola mundo\";
+    class Doughnut {
+        cook() {
+            print \"Fry until golden brown.\";
         }
     }
-    var g = Greeter();
-    g.greet();
+    class BostonCream < Doughnut {}
+    BostonCream().cook();
     ";
     let output = run_vm_output(source).expect("ejecución exitosa");
-    assert_eq!(output, "hola mundo\n");
+    assert_eq!(output, "Fry until golden brown.\n");
 }
 
 #[test]
-fn test_vm_method_access_and_modify_fields_via_this() {
+fn test_vm_method_override() {
     let source = "
-    class Cake {
-        setFlavor(flavor) {
-            this.flavor = flavor;
-        }
-        describe() {
-            print \"Pastel de \" + this.flavor;
+    class Doughnut {
+        cook() {
+            print \"Fry until golden brown.\";
         }
     }
-    var cake = Cake();
-    cake.setFlavor(\"chocolate\");
-    cake.describe();
+    class BostonCream < Doughnut {
+        cook() {
+            print \"Pipe full of custard and coat with chocolate.\";
+        }
+    }
+    BostonCream().cook();
     ";
     let output = run_vm_output(source).expect("ejecución exitosa");
-    assert_eq!(output, "Pastel de chocolate\n");
+    assert_eq!(output, "Pipe full of custard and coat with chocolate.\n");
 }
 
 #[test]
-fn test_vm_extracted_method_retains_receiver() {
+fn test_vm_super_method_call() {
     let source = "
-    class Person {
-        sayName() {
+    class Doughnut {
+        cook() {
+            print \"Doughnut cook\";
+        }
+    }
+    class BostonCream < Doughnut {
+        cook() {
+            super.cook();
+            print \"BostonCream cook\";
+        }
+    }
+    BostonCream().cook();
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "Doughnut cook\nBostonCream cook\n");
+}
+
+#[test]
+fn test_vm_inherited_initializer() {
+    let source = "
+    class Parent {
+        init(name) {
+            this.name = name;
+        }
+    }
+    class Child < Parent {}
+    var c = Child(\"Alex\");
+    print c.name;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "Alex\n");
+}
+
+#[test]
+fn test_vm_inherited_initializer_wrong_arity() {
+    let source = "
+    class Parent {
+        init(a, b) {
+            this.a = a;
+            this.b = b;
+        }
+    }
+    class Child < Parent {}
+    Child(1);
+    ";
+    let result = run_vm(source);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .contains("Expected 2 arguments but got 1.")
+    );
+}
+
+#[test]
+fn test_vm_three_level_super_maintains_original_receiver() {
+    let source = "
+    class A {
+        method() {
             print this.name;
         }
     }
-    var p = Person();
-    p.name = \"Alice\";
-    var fn_ptr = p.sayName;
-    fn_ptr();
-    ";
-    let output = run_vm_output(source).expect("ejecución exitosa");
-    assert_eq!(output, "Alice\n");
-}
-
-#[test]
-fn test_vm_field_shadows_method() {
-    let source = "
-    class Foo {
-        bar() {
-            print \"metodo\";
+    class B < A {
+        method() {
+            super.method();
         }
     }
-    var foo = Foo();
-    foo.bar = \"campo\";
-    print foo.bar;
-    ";
-    let output = run_vm_output(source).expect("ejecución exitosa");
-    assert_eq!(output, "campo\n");
-}
-
-#[test]
-fn test_vm_initializer_with_arguments_and_implicit_return() {
-    let source = "
-    class Point {
-        init(x, y) {
-            this.x = x;
-            this.y = y;
+    class C < B {
+        method() {
+            super.method();
         }
     }
-    var p = Point(3, 4);
-    print p.x;
-    print p.y;
+    var c = C();
+    c.name = \"Instancia de C\";
+    c.method();
     ";
     let output = run_vm_output(source).expect("ejecución exitosa");
-    assert_eq!(output, "3\n4\n");
+    assert_eq!(output, "Instancia de C\n");
 }
 
 #[test]
-fn test_vm_initializer_explicit_empty_return() {
+fn test_vm_super_and_this_captured_in_closure() {
     let source = "
-    class Foo {
-        init(early) {
-            this.val = \"normal\";
-            if (early) return;
-            this.val = \"modificado\";
+    class Base {
+        greet() {
+            return \"Base\";
         }
     }
-    var f1 = Foo(true);
-    var f2 = Foo(false);
-    print f1.val;
-    print f2.val;
-    ";
-    let output = run_vm_output(source).expect("ejecución exitosa");
-    assert_eq!(output, "normal\nmodificado\n");
-}
-
-#[test]
-fn test_vm_initializer_direct_invocation_returns_instance() {
-    let source = "
-    class Foo {
-        init(val) {
-            this.val = val;
+    class Derived < Base {
+        getGreeter() {
+            fun greeter() {
+                return super.greet() + \" for \" + this.name;
+            }
+            return greeter;
         }
     }
-    var foo = Foo(1);
-    print foo.val;
-    var ret = foo.init(2);
-    print foo.val;
-    print ret.val;
-    print foo == ret;
+    var d = Derived();
+    d.name = \"Alice\";
+    var fn_greeter = d.getGreeter();
+    print fn_greeter();
     ";
     let output = run_vm_output(source).expect("ejecución exitosa");
-    assert_eq!(output, "1\n2\n2\ntrue\n");
+    assert_eq!(output, "Base for Alice\n");
 }
 
 #[test]
-fn test_vm_initializer_wrong_arity() {
+fn test_vm_local_class_inheritance() {
     let source = "
-    class Foo {
-        init(a, b) {}
+    var result = \"\";
+    {
+        class LocalBase {
+            say() {
+                return \"base\";
+            }
+        }
+        class LocalSub < LocalBase {
+            say() {
+                return super.say() + \" sub\";
+            }
+        }
+        var s = LocalSub();
+        result = s.say();
     }
-    Foo(1);
+    print result;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "base sub\n");
+}
+
+#[test]
+fn test_vm_class_inheritance_in_function() {
+    let source = "
+    fun makeSub() {
+        class Base {
+            msg() {
+                return \"base msg\";
+            }
+        }
+        class Sub < Base {
+            msg() {
+                return super.msg() + \" extended\";
+            }
+        }
+        return Sub();
+    }
+    var inst = makeSub();
+    print inst.msg();
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "base msg extended\n");
+}
+
+#[test]
+fn test_vm_nested_classes_independent_contexts() {
+    let source = "
+    class Super {
+        foo() {
+            print \"Super foo\";
+        }
+    }
+    class Outer < Super {
+        getInner() {
+            class Inner {
+                bar() {
+                    print \"Inner bar\";
+                }
+            }
+            return Inner();
+        }
+        foo() {
+            super.foo();
+        }
+    }
+    var o = Outer();
+    o.foo();
+    var i = o.getInner();
+    i.bar();
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "Super foo\nInner bar\n");
+}
+
+#[test]
+fn test_vm_runtime_error_superclass_not_a_class() {
+    let source = "
+    var NotClass = \"I am a string\";
+    class Sub < NotClass {}
     ";
     let result = run_vm(source);
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Expected 2 arguments but got 1."));
+    assert!(result.unwrap_err().contains("Superclass must be a class."));
 }
 
 #[test]
-fn test_vm_this_captured_by_nested_function() {
+fn test_vm_runtime_error_undefined_super_property() {
     let source = "
-    class Counter {
-        init() {
-            this.count = 0;
-        }
-        getIncrementer() {
-            fun inc() {
-                this.count = this.count + 1;
-                return this.count;
-            }
-            return inc;
+    class Base {}
+    class Sub < Base {
+        foo() {
+            super.nonExistent();
         }
     }
-    var c = Counter();
-    var inc = c.getIncrementer();
-    print inc();
-    print inc();
-    print c.count;
-    ";
-    let output = run_vm_output(source).expect("ejecución exitosa");
-    assert_eq!(output, "1\n2\n2\n");
-}
-
-#[test]
-fn test_vm_normal_function_inside_initializer_can_return_value() {
-    let source = "
-    class Foo {
-        init() {
-            fun helper() {
-                return 42;
-            }
-            this.val = helper();
-        }
-    }
-    var f = Foo();
-    print f.val;
-    ";
-    let output = run_vm_output(source).expect("ejecución exitosa");
-    assert_eq!(output, "42\n");
-}
-
-#[test]
-fn test_vm_initializer_propagates_runtime_error() {
-    let source = "
-    class Foo {
-        init() {
-            var x = \"bad\" - 5;
-        }
-    }
-    Foo();
+    Sub().foo();
     ";
     let result = run_vm(source);
     assert!(result.is_err());
-    assert!(result.unwrap_err().contains("Operands must be numbers."));
-}
-
-#[test]
-fn test_vm_bound_methods_compared_by_identity() {
-    let source = "
-    class Foo {
-        method() {}
-    }
-    var foo = Foo();
-    var m1 = foo.method;
-    var m2 = foo.method;
-    print m1 == m1;
-    print m1 == m2;
-    ";
-    let output = run_vm_output(source).expect("ejecución exitosa");
-    assert_eq!(output, "true\nfalse\n");
+    assert!(
+        result
+            .unwrap_err()
+            .contains("Undefined property 'nonExistent'.")
+    );
 }

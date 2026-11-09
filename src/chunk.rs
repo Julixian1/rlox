@@ -53,6 +53,10 @@ pub enum OpCode {
     GetProperty(u16),
     SetProperty(u16),
     CheckInstance,
+
+    // Herencia
+    Inherit,
+    GetSuper(u16),
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -139,7 +143,8 @@ impl Chunk {
             | OpCode::Class(i)
             | OpCode::Method(i)
             | OpCode::GetProperty(i)
-            | OpCode::SetProperty(i) => {
+            | OpCode::SetProperty(i)
+            | OpCode::GetSuper(i) => {
                 format!(
                     "{:<14} {:4} '{}'",
                     name_of(&op),
@@ -223,6 +228,8 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::GetProperty(_) => "OP_GET_PROPERTY",
         OpCode::SetProperty(_) => "OP_SET_PROPERTY",
         OpCode::CheckInstance => "OP_CHECK_INSTANCE",
+        OpCode::Inherit => "OP_INHERIT",
+        OpCode::GetSuper(_) => "OP_GET_SUPER",
     }
 }
 

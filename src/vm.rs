@@ -392,6 +392,57 @@ impl<W: Write> Vm<W> {
                         _ => return Err(Self::error(chunk, ip, "Only instances have fields.")),
                     }
                 }
+                OpCode::Inherit => {
+                    let len = self.stack.len();
+                    if len < 2 {
+                        return Err(Self::error(chunk, ip, "Stack underflow in OP_INHERIT."));
+                    }
+                    let superclass_val = self.stack[len - 2].clone();
+                    let subclass_val = self.stack[len - 1].clone();
+
+                    let superclass = match superclass_val {
+                        Value::VmClass(ref k) => Rc::clone(k),
+                        _ => return Err(Self::error(chunk, ip, "Superclass must be a class.")),
+                    };
+                    let subclass = match subclass_val {
+                        Value::VmClass(ref k) => Rc::clone(k),
+                        _ => return Err(Self::error(chunk, ip, "Subclass must be a class.")),
+                    };
+
+                    let methods_to_copy: Vec<(String, Rc<Closure>)> = superclass
+                        .borrow()
+                        .methods
+                        .iter()
+                        .map(|(k, v)| (k.clone(), Rc::clone(v)))
+                        .collect();
+
+                    for (name, method) in methods_to_copy {
+                        subclass.borrow_mut().methods.insert(name, method);
+                    }
+
+                    self.pop();
+                }
+                OpCode::GetSuper(k) => {
+                    let name = Self::name_at(chunk, k);
+                    let superclass_val = self.pop();
+                    let this_val = self.pop();
+
+                    let superclass = match superclass_val {
+                        Value::VmClass(ref k) => Rc::clone(k),
+                        _ => unreachable!("OP_GET_SUPER espera una clase"),
+                    };
+
+                    if let Some(method) = superclass.borrow().methods.get(name).cloned() {
+                        let bound = BoundMethod::new(this_val, method);
+                        self.stack.push(Value::BoundMethod(Rc::new(bound)));
+                    } else {
+                        return Err(Self::error(
+                            chunk,
+                            ip,
+                            &format!("Undefined property '{}'.", name),
+                        ));
+                    }
+                }
                 OpCode::Return => {
                     let result = self.pop();
                     let frame = self.frames.pop().expect("no hay frame");

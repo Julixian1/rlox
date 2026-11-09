@@ -58,8 +58,13 @@ enum Var {
     Global,
 }
 
+struct ClassState {
+    has_superclass: bool,
+}
+
 pub struct Compiler {
     fns: Vec<FnState>,
+    classes: Vec<ClassState>,
     line: usize,
 }
 
@@ -71,6 +76,7 @@ impl Compiler {
     pub fn new() -> Self {
         Compiler {
             fns: vec![FnState::new(None, FnKind::Script)],
+            classes: Vec::new(),
             line: 1,
         }
     }
@@ -160,16 +166,36 @@ impl Compiler {
         }
     }
 
-    fn add_local(&mut self, name: &Token) -> CResult {
+    fn add_local_name(&mut self, name: &str) -> CResult {
         if self.state().locals.len() > u16::MAX as usize {
             return Err(self.error("Too many local variables."));
         }
         let depth = self.state().scope_depth;
         self.state().locals.push(Local {
-            name: name.lexeme.clone(),
+            name: name.to_string(),
             depth,
             is_captured: false,
         });
+        Ok(())
+    }
+
+    fn add_local(&mut self, name: &Token) -> CResult {
+        self.add_local_name(&name.lexeme)
+    }
+
+    fn emit_get_var(&mut self, var: &Var, name: &str) -> CResult {
+        match var {
+            Var::Local(slot) => {
+                self.emit(OpCode::GetLocal(*slot));
+            }
+            Var::Upvalue(index) => {
+                self.emit(OpCode::GetUpvalue(*index));
+            }
+            Var::Global => {
+                let k = self.identifier_constant(name)?;
+                self.emit(OpCode::GetGlobal(k));
+            }
+        }
         Ok(())
     }
 
@@ -353,19 +379,8 @@ impl ExprVisitor<CResult> for Compiler {
 
     fn visit_variable_expr(&mut self, name: &Token) -> CResult {
         self.line = name.line;
-        match self.resolve_variable(&name.lexeme)? {
-            Var::Local(slot) => {
-                self.emit(OpCode::GetLocal(slot));
-            }
-            Var::Upvalue(index) => {
-                self.emit(OpCode::GetUpvalue(index));
-            }
-            Var::Global => {
-                let k = self.identifier_constant(&name.lexeme)?;
-                self.emit(OpCode::GetGlobal(k));
-            }
-        }
-        Ok(())
+        let var = self.resolve_variable(&name.lexeme)?;
+        self.emit_get_var(&var, &name.lexeme)
     }
 
     fn visit_assign_expr(&mut self, name: &Token, value: &Expr) -> CResult {
@@ -451,21 +466,30 @@ impl ExprVisitor<CResult> for Compiler {
 
     fn visit_this_expr(&mut self, _expr: &Expr, keyword: &Token) -> CResult {
         self.line = keyword.line;
-        match self.resolve_variable("this")? {
-            Var::Local(slot) => {
-                self.emit(OpCode::GetLocal(slot));
-            }
-            Var::Upvalue(index) => {
-                self.emit(OpCode::GetUpvalue(index));
-            }
-            Var::Global => unreachable!("'this' no puede resolverse como global"),
+        if self.classes.is_empty() {
+            return Err(self.error("Can't use 'this' outside of a class."));
         }
+        let var = self.resolve_variable("this")?;
+        self.emit_get_var(&var, "this")?;
         Ok(())
     }
 
-    fn visit_super_expr(&mut self, _expr: &Expr, keyword: &Token, _method: &Token) -> CResult {
+    fn visit_super_expr(&mut self, _expr: &Expr, keyword: &Token, method: &Token) -> CResult {
         self.line = keyword.line;
-        Err(self.error("Classes and inheritance are not supported in VM backend."))
+        match self.classes.last() {
+            None => return Err(self.error("Can't use 'super' outside of a class.")),
+            Some(cs) if !cs.has_superclass => {
+                return Err(self.error("Can't use 'super' in a class with no superclass."));
+            }
+            _ => {}
+        }
+        let this_var = self.resolve_variable("this")?;
+        self.emit_get_var(&this_var, "this")?;
+        let super_var = self.resolve_variable("super")?;
+        self.emit_get_var(&super_var, "super")?;
+        let k = self.identifier_constant(&method.lexeme)?;
+        self.emit(OpCode::GetSuper(k));
+        Ok(())
     }
 }
 
@@ -592,40 +616,105 @@ impl StmtVisitor<CResult> for Compiler {
         methods: &[Stmt],
     ) -> CResult {
         self.line = name.line;
-        if superclass.is_some() {
-            return Err(self.error("Inheritance is not supported yet in VM backend."));
-        }
-
         let is_local = self.state().scope_depth > 0;
-        if is_local {
-            self.add_local(name)?;
-        }
-
         let name_constant = self.identifier_constant(&name.lexeme)?;
-        self.emit(OpCode::Class(name_constant));
 
-        for method in methods {
-            if let Stmt::Function {
-                name: method_name,
-                params,
-                body,
-            } = method
-            {
-                let kind = if method_name.lexeme == "init" {
-                    FnKind::Initializer
+        if let Some(super_expr) = superclass {
+            if is_local {
+                self.add_local_name(&name.lexeme)?;
+            }
+
+            self.emit(OpCode::Class(name_constant));
+
+            if !is_local {
+                self.emit(OpCode::DefineGlobal(name_constant));
+            }
+
+            super_expr.accept(self)?;
+
+            self.begin_scope();
+            self.add_local_name("super")?;
+
+            if is_local {
+                let slot = self.state().resolve_local(&name.lexeme).unwrap();
+                self.emit(OpCode::GetLocal(slot as u16));
+            } else {
+                self.emit(OpCode::GetGlobal(name_constant));
+            }
+
+            self.emit(OpCode::Inherit);
+
+            self.classes.push(ClassState {
+                has_superclass: true,
+            });
+
+            if !methods.is_empty() {
+                if is_local {
+                    let slot = self.state().resolve_local(&name.lexeme).unwrap();
+                    self.emit(OpCode::GetLocal(slot as u16));
                 } else {
-                    FnKind::Method
-                };
-                self.compile_function_body(method_name, params, body, kind)?;
-                let method_k = self.identifier_constant(&method_name.lexeme)?;
-                self.emit(OpCode::Method(method_k));
+                    self.emit(OpCode::GetGlobal(name_constant));
+                }
+
+                for method in methods {
+                    if let Stmt::Function {
+                        name: method_name,
+                        params,
+                        body,
+                    } = method
+                    {
+                        let kind = if method_name.lexeme == "init" {
+                            FnKind::Initializer
+                        } else {
+                            FnKind::Method
+                        };
+                        self.compile_function_body(method_name, params, body, kind)?;
+                        let method_k = self.identifier_constant(&method_name.lexeme)?;
+                        self.emit(OpCode::Method(method_k));
+                    }
+                }
+
+                self.emit(OpCode::Pop);
+            }
+
+            self.classes.pop();
+            self.end_scope();
+        } else {
+            if is_local {
+                self.add_local_name(&name.lexeme)?;
+            }
+
+            self.emit(OpCode::Class(name_constant));
+
+            self.classes.push(ClassState {
+                has_superclass: false,
+            });
+
+            for method in methods {
+                if let Stmt::Function {
+                    name: method_name,
+                    params,
+                    body,
+                } = method
+                {
+                    let kind = if method_name.lexeme == "init" {
+                        FnKind::Initializer
+                    } else {
+                        FnKind::Method
+                    };
+                    self.compile_function_body(method_name, params, body, kind)?;
+                    let method_k = self.identifier_constant(&method_name.lexeme)?;
+                    self.emit(OpCode::Method(method_k));
+                }
+            }
+
+            self.classes.pop();
+
+            if !is_local {
+                self.emit(OpCode::DefineGlobal(name_constant));
             }
         }
 
-        if !is_local {
-            let global = self.identifier_constant(&name.lexeme)?;
-            self.emit(OpCode::DefineGlobal(global));
-        }
         Ok(())
     }
 }
