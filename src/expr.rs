@@ -19,6 +19,14 @@ pub trait ExprVisitor<R> {
     fn visit_logical_expr(&mut self, left: &Expr, operator: &Token, right: &Expr) -> R;
     /// Procesa una llamada a función (`fun_name(arg1, arg2)`).
     fn visit_call_expr(&mut self, callee: &Expr, paren: &Token, arguments: &[Expr]) -> R;
+    /// Procesa el acceso a una propiedad (`object.name`).
+    fn visit_get_expr(&mut self, object: &Expr, name: &Token) -> R;
+    /// Procesa la asignación a una propiedad (`object.name = value`).
+    fn visit_set_expr(&mut self, object: &Expr, name: &Token, value: &Expr) -> R;
+    /// Procesa la expresión `this`.
+    fn visit_this_expr(&mut self, expr: &Expr, keyword: &Token) -> R;
+    /// Procesa el acceso a método de superclase (`super.method`).
+    fn visit_super_expr(&mut self, expr: &Expr, keyword: &Token, method: &Token) -> R;
 }
 
 // Valores literales en el AST (distinto a token::Literal del scanner).
@@ -77,6 +85,22 @@ pub enum Expr {
         paren: Token,
         arguments: Vec<Expr>,
     },
+    Get {
+        object: Box<Expr>,
+        name: Token,
+    },
+    Set {
+        object: Box<Expr>,
+        name: Token,
+        value: Box<Expr>,
+    },
+    This {
+        keyword: Token,
+    },
+    Super {
+        keyword: Token,
+        method: Token,
+    },
 }
 
 impl Expr {
@@ -103,6 +127,14 @@ impl Expr {
                 paren,
                 arguments,
             } => visitor.visit_call_expr(callee, paren, &arguments),
+            Expr::Get { object, name } => visitor.visit_get_expr(object, name),
+            Expr::Set {
+                object,
+                name,
+                value,
+            } => visitor.visit_set_expr(object, name, value),
+            Expr::This { keyword } => visitor.visit_this_expr(self, keyword),
+            Expr::Super { keyword, method } => visitor.visit_super_expr(self, keyword, method),
         }
     }
 }
@@ -145,6 +177,18 @@ impl fmt::Display for Expr {
                 }
                 write!(f, ")")
             }
+            Expr::Get { object, name } => {
+                write!(f, "(. {} {})", object, name.lexeme)
+            }
+            Expr::Set {
+                object,
+                name,
+                value,
+            } => {
+                write!(f, "(= (. {} {}) {})", object, name.lexeme, value)
+            }
+            Expr::This { .. } => write!(f, "this"),
+            Expr::Super { method, .. } => write!(f, "(super {})", method.lexeme),
         }
     }
 }

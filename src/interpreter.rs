@@ -231,6 +231,18 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
 
         Err(ReturnSignal::Return(return_val))
     }
+
+    fn visit_class_stmt(
+        &mut self,
+        name: &Token,
+        _superclass: &Option<Expr>,
+        _methods: &[Stmt],
+    ) -> Result<(), ReturnSignal> {
+        Err(ReturnSignal::Error(format!(
+            "[line {}] Runtime support for classes is not yet available.",
+            name.line
+        )))
+    }
 }
 
 impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
@@ -372,5 +384,47 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
                 paren.line
             )))
         }
+    }
+
+    fn visit_get_expr(&mut self, _object: &Expr, name: &Token) -> Result<Value, ReturnSignal> {
+        Err(ReturnSignal::Error(format!(
+            "[line {}] Runtime support for classes is not yet available.",
+            name.line
+        )))
+    }
+
+    fn visit_set_expr(
+        &mut self,
+        _object: &Expr,
+        name: &Token,
+        _value: &Expr,
+    ) -> Result<Value, ReturnSignal> {
+        Err(ReturnSignal::Error(format!(
+            "[line {}] Runtime support for classes is not yet available.",
+            name.line
+        )))
+    }
+
+    fn visit_this_expr(
+        &mut self,
+        _expr: &Expr,
+        keyword: &Token,
+    ) -> Result<Value, ReturnSignal> {
+        Err(ReturnSignal::Error(format!(
+            "[line {}] Runtime support for classes is not yet available.",
+            keyword.line
+        )))
+    }
+
+    fn visit_super_expr(
+        &mut self,
+        _expr: &Expr,
+        keyword: &Token,
+        _method: &Token,
+    ) -> Result<Value, ReturnSignal> {
+        Err(ReturnSignal::Error(format!(
+            "[line {}] Runtime support for classes is not yet available.",
+            keyword.line
+        )))
     }
 }

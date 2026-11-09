@@ -93,6 +93,15 @@ impl Resolver {
             Expr::Unary { right, .. } => {
                 self.resolve_expr(right);
             }
+            Expr::Get { object, .. } => {
+                self.resolve_expr(object);
+            }
+            Expr::Set { object, value, .. } => {
+                self.resolve_expr(value);
+                self.resolve_expr(object);
+            }
+            Expr::This { .. } => {}
+            Expr::Super { .. } => {}
         }
     }
 }
@@ -152,6 +161,21 @@ impl StmtVisitor<()> for Resolver {
         self.resolve_expr(condition);
         self.resolve_stmt(body);
     }
+
+    fn visit_class_stmt(
+        &mut self,
+        name: &Token,
+        superclass: &Option<Expr>,
+        methods: &[Stmt],
+    ) {
+        self.declare(name);
+        if let Some(super_expr) = superclass {
+            self.resolve_expr(super_expr);
+        }
+        for method in methods {
+            self.resolve_stmt(method);
+        }
+    }
 }
  
 impl ExprVisitor<()> for Resolver {
@@ -180,5 +204,18 @@ impl ExprVisitor<()> for Resolver {
             self.resolve_expr(arg);
         }
     }
+
+    fn visit_get_expr(&mut self, object: &Expr, _name: &Token) {
+        self.resolve_expr(object);
+    }
+
+    fn visit_set_expr(&mut self, object: &Expr, _name: &Token, value: &Expr) {
+        self.resolve_expr(value);
+        self.resolve_expr(object);
+    }
+
+    fn visit_this_expr(&mut self, _expr: &Expr, _keyword: &Token) {}
+
+    fn visit_super_expr(&mut self, _expr: &Expr, _keyword: &Token, _method: &Token) {}
 }
  

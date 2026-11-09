@@ -80,6 +80,17 @@ impl StmtVisitor<()> for ReturnCheck {
             ));
         }
     }
+
+    fn visit_class_stmt(
+        &mut self,
+        _name: &Token,
+        _superclass: &Option<Expr>,
+        methods: &[Stmt],
+    ) {
+        for method in methods {
+            method.accept(self);
+        }
+    }
 }
  
 
@@ -163,6 +174,13 @@ impl DeclarationCheck {
             Expr::Grouping { expression } => self.check_expr(expression),
             Expr::Unary { right, .. } => self.check_expr(right),
             Expr::Literal { .. } => {}
+            Expr::Get { object, .. } => self.check_expr(object),
+            Expr::Set { object, value, .. } => {
+                self.check_expr(object);
+                self.check_expr(value);
+            }
+            Expr::This { .. } => {}
+            Expr::Super { .. } => {}
         }
     }
 }
@@ -229,6 +247,22 @@ impl StmtVisitor<()> for DeclarationCheck {
     fn visit_return_stmt(&mut self, _keyword: &Token, value: &Option<Expr>) {
         if let Some(expr) = value {
             self.check_expr(expr);
+        }
+    }
+
+    fn visit_class_stmt(
+        &mut self,
+        name: &Token,
+        superclass: &Option<Expr>,
+        methods: &[Stmt],
+    ) {
+        self.declare(name);
+        self.define(name);
+        if let Some(super_expr) = superclass {
+            self.check_expr(super_expr);
+        }
+        for method in methods {
+            method.accept(self);
         }
     }
 }

@@ -26,6 +26,8 @@ pub trait StmtVisitor<R> {
     fn visit_function_stmt(&mut self, name: &Token, params: &[Token], body: &Rc<Vec<Stmt>>) -> R;
     /// Procesa una sentencia de retorno (`return expr;`).
     fn visit_return_stmt(&mut self, keyword: &Token, value: &Option<Expr>) -> R;
+    /// Procesa una declaración de clase (`class name < superclass { methods }`).
+    fn visit_class_stmt(&mut self, name: &Token, superclass: &Option<Expr>, methods: &[Stmt]) -> R;
 }
 
 // Nodos de statement del AST.
@@ -62,6 +64,11 @@ pub enum Stmt {
         keyword: Token,
         value: Option<Expr>,
     },
+    Class {
+        name: Token,
+        superclass: Option<Expr>,
+        methods: Vec<Stmt>,
+    },
 }
 
 impl Stmt {
@@ -82,6 +89,11 @@ impl Stmt {
                 visitor.visit_function_stmt(name, params, body)
             }
             Stmt::Return { keyword, value } => visitor.visit_return_stmt(keyword, value),
+            Stmt::Class {
+                name,
+                superclass,
+                methods,
+            } => visitor.visit_class_stmt(name, superclass, methods),
         }
     }
 }

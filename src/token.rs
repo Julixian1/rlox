@@ -30,6 +30,7 @@ pub enum TokenType {
 
     // Palabras clave
     And,
+    Class,
     Else,
     False,
     Fun,
@@ -39,6 +40,8 @@ pub enum TokenType {
     Or,
     Print,
     Return,
+    Super,
+    This,
     True,
     Var,
     While,
@@ -91,6 +94,7 @@ impl Token {
 pub fn get_keyword(keyword: &str) -> Option<TokenType> {
     match keyword {
         "and" => Some(TokenType::And),
+        "class" => Some(TokenType::Class),
         "else" => Some(TokenType::Else),
         "false" => Some(TokenType::False),
         "fun" => Some(TokenType::Fun),
@@ -100,6 +104,8 @@ pub fn get_keyword(keyword: &str) -> Option<TokenType> {
         "or" => Some(TokenType::Or),
         "print" => Some(TokenType::Print),
         "return" => Some(TokenType::Return),
+        "super" => Some(TokenType::Super),
+        "this" => Some(TokenType::This),
         "true" => Some(TokenType::True),
         "var" => Some(TokenType::Var),
         "while" => Some(TokenType::While),

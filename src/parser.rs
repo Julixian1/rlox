@@ -102,7 +102,8 @@ impl Parser {
             }
 
             match self.peek().token_type {
-                TokenType::Fun
+                TokenType::Class
+                | TokenType::Fun
                 | TokenType::Var
                 | TokenType::For
                 | TokenType::If
@@ -118,8 +119,11 @@ impl Parser {
 
     // DECLARATIONS
 
-    /// Parsea una declaración (función, variable o sentencia).
+    /// Parsea una declaración (clase, función, variable o sentencia).
     fn declaration(&mut self) -> Result<Stmt, String> {
+        if self.match_token(&[TokenType::Class]) {
+            return self.class_declaration();
+        }
         if self.match_token(&[TokenType::Fun]) {
             return self.fun_declaration();
         }
@@ -127,6 +131,74 @@ impl Parser {
             return self.var_declaration();
         }
         self.statement()
+    }
+
+    /// Parsea una declaración de clase (`class nombre < superclase { metodos }`).
+    fn class_declaration(&mut self) -> Result<Stmt, String> {
+        let name = self.consume(&TokenType::Identifier, "Expected class name.")?;
+
+        let superclass = if self.match_token(&[TokenType::Less]) {
+            let superclass_name =
+                self.consume(&TokenType::Identifier, "Expected superclass name.")?;
+            if superclass_name.lexeme == name.lexeme {
+                return Err(format!(
+                    "[line {}] Error at '{}': A class can't inherit from itself.",
+                    superclass_name.line, superclass_name.lexeme
+                ));
+            }
+            Some(Expr::Variable {
+                name: superclass_name,
+            })
+        } else {
+            None
+        };
+
+        self.consume(&TokenType::LeftBrace, "Expected '{' before class body.")?;
+
+        let mut methods = Vec::new();
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            methods.push(self.method()?);
+        }
+
+        self.consume(&TokenType::RightBrace, "Expected '}' after class body.")?;
+
+        Ok(Stmt::Class {
+            name,
+            superclass,
+            methods,
+        })
+    }
+
+    /// Parsea un método dentro de una clase (similar a una función pero sin la palabra clave 'fun').
+    fn method(&mut self) -> Result<Stmt, String> {
+        let name = self.consume(&TokenType::Identifier, "Expected method name.")?;
+
+        self.consume(&TokenType::LeftParen, "Expected '(' after method name.")?;
+
+        let mut params: Vec<Token> = Vec::new();
+        if !self.check(&TokenType::RightParen) {
+            loop {
+                if params.len() >= 255 {
+                    let token = self.peek().clone();
+                    return Err(format!(
+                        "[line {}] Error: Can't have more than 255 parameters.",
+                        token.line
+                    ));
+                }
+                params.push(self.consume(&TokenType::Identifier, "Expected parameter name.")?);
+
+                if !self.match_token(&[TokenType::Comma]) {
+                    break;
+                }
+            }
+        }
+
+        self.consume(&TokenType::RightParen, "Expected ')' after parameters.")?;
+        self.consume(&TokenType::LeftBrace, "Expected '{' before method body.")?;
+
+        let body = std::rc::Rc::new(self.block()?);
+
+        Ok(Stmt::Function { name, params, body })
     }
 
     /// Parsea una declaración de función (`fun nombre(params) { ... }`).
@@ -358,6 +430,12 @@ impl Parser {
                     name,
                     value: Box::new(value),
                 });
+            } else if let Expr::Get { object, name } = expr {
+                return Ok(Expr::Set {
+                    object,
+                    name,
+                    value: Box::new(value),
+                });
             }
 
             let equals = self.previous().clone();
@@ -491,13 +569,20 @@ impl Parser {
         self.call()
     }
 
-    /// Parsea llamadas a función (`callee(args...)`).
+    /// Parsea llamadas a función (`callee(args...)`) y acceso a propiedades (`object.property`).
     fn call(&mut self) -> Result<Expr, String> {
         let mut expr = self.primary()?;
 
         loop {
             if self.match_token(&[TokenType::LeftParen]) {
                 expr = self.finish_call(expr)?;
+            } else if self.match_token(&[TokenType::Dot]) {
+                let name =
+                    self.consume(&TokenType::Identifier, "Expected property name after '.'.")?;
+                expr = Expr::Get {
+                    object: Box::new(expr),
+                    name,
+                };
             } else {
                 break;
             }
@@ -586,6 +671,22 @@ impl Parser {
             return Ok(Expr::Variable {
                 name: self.previous().clone(),
             });
+        }
+
+        // 'this'
+        if self.match_token(&[TokenType::This]) {
+            return Ok(Expr::This {
+                keyword: self.previous().clone(),
+            });
+        }
+
+        // 'super'
+        if self.match_token(&[TokenType::Super]) {
+            let keyword = self.previous().clone();
+            self.consume(&TokenType::Dot, "Expected '.' after 'super'.")?;
+            let method =
+                self.consume(&TokenType::Identifier, "Expected superclass method name.")?;
+            return Ok(Expr::Super { keyword, method });
         }
 
         // Agrupamiento

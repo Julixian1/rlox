@@ -367,6 +367,26 @@ impl ExprVisitor<CResult> for Compiler {
         self.emit(OpCode::Call(arguments.len() as u8));
         Ok(())
     }
+
+    fn visit_get_expr(&mut self, _object: &Expr, name: &Token) -> CResult {
+        self.line = name.line;
+        Err(self.error("Classes and inheritance are not supported in VM backend."))
+    }
+
+    fn visit_set_expr(&mut self, _object: &Expr, name: &Token, _value: &Expr) -> CResult {
+        self.line = name.line;
+        Err(self.error("Classes and inheritance are not supported in VM backend."))
+    }
+
+    fn visit_this_expr(&mut self, _expr: &Expr, keyword: &Token) -> CResult {
+        self.line = keyword.line;
+        Err(self.error("Classes and inheritance are not supported in VM backend."))
+    }
+
+    fn visit_super_expr(&mut self, _expr: &Expr, keyword: &Token, _method: &Token) -> CResult {
+        self.line = keyword.line;
+        Err(self.error("Classes and inheritance are not supported in VM backend."))
+    }
 }
  
 impl StmtVisitor<CResult> for Compiler {
@@ -499,5 +519,15 @@ impl StmtVisitor<CResult> for Compiler {
         }
         self.emit(OpCode::Return);
         Ok(())
+    }
+
+    fn visit_class_stmt(
+        &mut self,
+        name: &Token,
+        _superclass: &Option<Expr>,
+        _methods: &[Stmt],
+    ) -> CResult {
+        self.line = name.line;
+        Err(self.error("Classes and inheritance are not supported in VM backend."))
     }
 }
