@@ -282,3 +282,25 @@ fn test_checker_nested_classes_preserve_semantic_contexts() {
     assert_eq!(errors.len(), 1);
     assert!(errors[0].contains("Can't use 'super' in a class with no superclass."));
 }
+
+#[test]
+fn test_checker_nested_classes_preserve_semantic_contexts() {
+    let source = "
+    class Base {
+      baseMethod() {}
+    }
+    class Outer < Base {
+      outerMethod() {
+        super.baseMethod();
+        class Inner {
+          innerMethod() {
+            super.baseMethod();
+          }
+        }
+      }
+    }
+    ";
+    let errors = check_source(source);
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].contains("Can't use 'super' in a class with no superclass."));
+}

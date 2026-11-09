@@ -8,17 +8,17 @@ pub enum OpCode {
     Nil,
     True,
     False,
- 
+
     // Stack
     Pop,
- 
+
     // Variables
-    GetLocal(u16), 
+    GetLocal(u16),
     SetLocal(u16),
     GetGlobal(u16),
     DefineGlobal(u16),
     SetGlobal(u16),
- 
+
     // Comparación y aritmética
     Equal,
     Greater,
@@ -30,45 +30,45 @@ pub enum OpCode {
     Modulo,
     Not,
     Negate,
- 
+
     // Sentencias y control de flujo
     Print,
-    Jump(u16),        
+    Jump(u16),
     JumpIfFalse(u16),
-    Loop(u16),        
- 
+    Loop(u16),
+
     // Funciones
     Call(u8), // cantidad de argumentos
     Return,
- 
+
     // Closures
-    Closure(u16), 
+    Closure(u16),
     GetUpvalue(u16),
     SetUpvalue(u16),
     CloseUpvalue,
 }
- 
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Chunk {
     pub code: Vec<OpCode>,
     pub constants: Vec<Value>,
     pub lines: Vec<usize>,
 }
- 
+
 #[derive(Debug, PartialEq)]
 pub struct TooManyConstants;
- 
+
 impl Chunk {
     pub fn new() -> Self {
         Self::default()
     }
- 
+
     pub fn write(&mut self, op: OpCode, line: usize) -> usize {
         self.code.push(op);
         self.lines.push(line);
         self.code.len() - 1
     }
- 
+
     pub fn add_constant(&mut self, value: Value) -> Result<u16, TooManyConstants> {
         let index = self.constants.len();
         if index > u16::MAX as usize {
@@ -77,12 +77,12 @@ impl Chunk {
         self.constants.push(value);
         Ok(index as u16)
     }
- 
+
     pub fn emit_jump(&mut self, op: OpCode, line: usize) -> usize {
         debug_assert!(matches!(op, OpCode::Jump(_) | OpCode::JumpIfFalse(_)));
         self.write(op, line)
     }
- 
+
     pub fn patch_jump(&mut self, at: usize) -> Result<(), ()> {
         // `ip` ya apunta a `at + 1` cuando se ejecuta el salto.
         let offset = self.code.len() - at - 1;
@@ -93,7 +93,7 @@ impl Chunk {
         }
         Ok(())
     }
- 
+
     pub fn emit_loop(&mut self, loop_start: usize, line: usize) -> Result<(), ()> {
         // +1 porque `ip` ya avanzó más allá del propio `Loop` al ejecutarlo.
         let offset = self.code.len() - loop_start + 1;
@@ -101,7 +101,7 @@ impl Chunk {
         self.write(OpCode::Loop(offset), line);
         Ok(())
     }
- 
+
     pub fn disassemble(&self, name: &str) -> String {
         let mut out = format!("== {name} ==\n");
         for offset in 0..self.code.len() {
@@ -116,7 +116,7 @@ impl Chunk {
         }
         out
     }
- 
+
     pub fn disassemble_instruction(&self, offset: usize) -> String {
         let line = if offset > 0 && self.lines[offset] == self.lines[offset - 1] {
             "   |".to_string()
@@ -129,7 +129,12 @@ impl Chunk {
             | OpCode::GetGlobal(i)
             | OpCode::DefineGlobal(i)
             | OpCode::SetGlobal(i) => {
-                format!("{:<14} {:4} '{}'", name_of(&op), i, self.constants[i as usize])
+                format!(
+                    "{:<14} {:4} '{}'",
+                    name_of(&op),
+                    i,
+                    self.constants[i as usize]
+                )
             }
             OpCode::GetLocal(s)
             | OpCode::SetLocal(s)
@@ -148,10 +153,20 @@ impl Chunk {
                 text
             }
             OpCode::Jump(o) | OpCode::JumpIfFalse(o) => {
-                format!("{:<14} {:4} -> {}", name_of(&op), o, offset + 1 + o as usize)
+                format!(
+                    "{:<14} {:4} -> {}",
+                    name_of(&op),
+                    o,
+                    offset + 1 + o as usize
+                )
             }
             OpCode::Loop(o) => {
-                format!("{:<14} {:4} -> {}", name_of(&op), o, offset + 1 - o as usize)
+                format!(
+                    "{:<14} {:4} -> {}",
+                    name_of(&op),
+                    o,
+                    offset + 1 - o as usize
+                )
             }
             OpCode::Call(n) => format!("{:<14} {:4}", name_of(&op), n),
             _ => name_of(&op).to_string(),
@@ -159,7 +174,7 @@ impl Chunk {
         format!("{offset:04} {line} {detail}")
     }
 }
- 
+
 fn name_of(op: &OpCode) -> &'static str {
     match op {
         OpCode::Constant(_) => "OP_CONSTANT",
@@ -194,10 +209,9 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::CloseUpvalue => "OP_CLOSE_UPVALUE",
     }
 }
- 
+
 impl fmt::Display for Chunk {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.disassemble("chunk"))
     }
 }
- 

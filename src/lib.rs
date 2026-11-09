@@ -1,5 +1,7 @@
 //! Módulos principales del intérprete RLox.
 
+/// Representación de clases e instancias de Lox.
+pub mod class;
 /// Gestión de entornos y ámbitos de variables.
 pub mod environment;
 /// Representación de nodos de expresiones en el AST.
@@ -20,8 +22,6 @@ pub mod stmt;
 pub mod token;
 /// Definición de los valores en tiempo de ejecución de Lox.
 pub mod value;
-/// Representación de clases e instancias de Lox.
-pub mod class;
 
 pub mod vm;
 

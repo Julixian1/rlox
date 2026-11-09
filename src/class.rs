@@ -106,4 +106,3 @@ impl fmt::Debug for LoxInstance {
         write!(f, "<instance of {}>", self.class.borrow().name)
     }
 }
-

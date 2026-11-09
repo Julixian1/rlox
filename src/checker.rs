@@ -1,19 +1,19 @@
 use std::collections::HashMap;
 use std::rc::Rc;
- 
+
 use crate::expr::Expr;
 use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::Token;
- 
+
 type Finding = (usize, String);
- 
+
 pub fn check(statements: &[Stmt]) -> Vec<String> {
     let mut findings = ReturnCheck::run(statements);
     findings.extend(DeclarationCheck::run(statements));
     findings.sort_by_key(|(line, _)| *line);
     findings.into_iter().map(|(_, message)| message).collect()
 }
- 
+
 #[derive(Copy, Clone, PartialEq)]
 enum FunctionContext {
     None,
@@ -25,7 +25,7 @@ struct ReturnCheck {
     context: FunctionContext,
     findings: Vec<Finding>,
 }
- 
+
 impl ReturnCheck {
     fn run(statements: &[Stmt]) -> Vec<Finding> {
         let mut pass = ReturnCheck {
@@ -38,19 +38,19 @@ impl ReturnCheck {
         pass.findings
     }
 }
- 
+
 impl StmtVisitor<()> for ReturnCheck {
     // Estos statements no contienen otros statements: nada que recorrer.
     fn visit_expression_stmt(&mut self, _expression: &Expr) {}
     fn visit_print_stmt(&mut self, _expression: &Expr) {}
     fn visit_var_stmt(&mut self, _name: &Token, _initializer: &Option<Expr>) {}
- 
+
     fn visit_block_stmt(&mut self, statements: &[Stmt]) {
         for stmt in statements {
             stmt.accept(self);
         }
     }
- 
+
     fn visit_if_stmt(
         &mut self,
         _condition: &Expr,
@@ -62,11 +62,11 @@ impl StmtVisitor<()> for ReturnCheck {
             else_stmt.accept(self);
         }
     }
- 
+
     fn visit_while_stmt(&mut self, _condition: &Expr, body: &Stmt) {
         body.accept(self);
     }
- 
+
     fn visit_function_stmt(&mut self, _name: &Token, _params: &[Token], body: &Rc<Vec<Stmt>>) {
         let enclosing = self.context;
         self.context = FunctionContext::Function;
@@ -75,7 +75,7 @@ impl StmtVisitor<()> for ReturnCheck {
         }
         self.context = enclosing;
     }
- 
+
     fn visit_return_stmt(&mut self, keyword: &Token, value: &Option<Expr>) {
         if self.context == FunctionContext::None {
             self.findings.push((
@@ -96,12 +96,7 @@ impl StmtVisitor<()> for ReturnCheck {
         }
     }
 
-    fn visit_class_stmt(
-        &mut self,
-        _name: &Token,
-        _superclass: &Option<Expr>,
-        methods: &[Stmt],
-    ) {
+    fn visit_class_stmt(&mut self, _name: &Token, _superclass: &Option<Expr>, methods: &[Stmt]) {
         for method in methods {
             if let Stmt::Function { name, body, .. } = method {
                 let enclosing = self.context;
@@ -118,7 +113,6 @@ impl StmtVisitor<()> for ReturnCheck {
         }
     }
 }
- 
 
 #[derive(Copy, Clone, PartialEq)]
 enum ClassContext {
@@ -133,7 +127,7 @@ struct DeclarationCheck {
     in_class: bool,
     class_context: ClassContext,
 }
- 
+
 impl DeclarationCheck {
     fn run(statements: &[Stmt]) -> Vec<Finding> {
         let mut pass = DeclarationCheck {
@@ -147,15 +141,15 @@ impl DeclarationCheck {
         }
         pass.findings
     }
- 
+
     fn begin_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
- 
+
     fn end_scope(&mut self) {
         self.scopes.pop();
     }
- 
+
     /// Declara la variable en el scope actual, todavía sin inicializar.
     fn declare(&mut self, name: &Token) {
         if let Some(scope) = self.scopes.last_mut() {
@@ -171,13 +165,13 @@ impl DeclarationCheck {
             scope.insert(name.lexeme.clone(), false);
         }
     }
- 
+
     fn define(&mut self, name: &Token) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.lexeme.clone(), true);
         }
     }
- 
+
     fn check_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Variable { name } => {
@@ -251,16 +245,16 @@ impl DeclarationCheck {
         }
     }
 }
- 
+
 impl StmtVisitor<()> for DeclarationCheck {
     fn visit_expression_stmt(&mut self, expression: &Expr) {
         self.check_expr(expression);
     }
- 
+
     fn visit_print_stmt(&mut self, expression: &Expr) {
         self.check_expr(expression);
     }
- 
+
     fn visit_var_stmt(&mut self, name: &Token, initializer: &Option<Expr>) {
         self.declare(name);
         if let Some(init) = initializer {
@@ -268,7 +262,7 @@ impl StmtVisitor<()> for DeclarationCheck {
         }
         self.define(name);
     }
- 
+
     fn visit_block_stmt(&mut self, statements: &[Stmt]) {
         self.begin_scope();
         for stmt in statements {
@@ -276,7 +270,7 @@ impl StmtVisitor<()> for DeclarationCheck {
         }
         self.end_scope();
     }
- 
+
     fn visit_if_stmt(
         &mut self,
         condition: &Expr,
@@ -289,17 +283,17 @@ impl StmtVisitor<()> for DeclarationCheck {
             else_stmt.accept(self);
         }
     }
- 
+
     fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) {
         self.check_expr(condition);
         body.accept(self);
     }
- 
+
     fn visit_function_stmt(&mut self, name: &Token, params: &[Token], body: &Rc<Vec<Stmt>>) {
         // El nombre queda definido antes del cuerpo: la función puede llamarse a sí misma.
         self.declare(name);
         self.define(name);
- 
+
         self.begin_scope();
         for param in params {
             self.declare(param);
@@ -310,19 +304,14 @@ impl StmtVisitor<()> for DeclarationCheck {
         }
         self.end_scope();
     }
- 
+
     fn visit_return_stmt(&mut self, _keyword: &Token, value: &Option<Expr>) {
         if let Some(expr) = value {
             self.check_expr(expr);
         }
     }
 
-    fn visit_class_stmt(
-        &mut self,
-        name: &Token,
-        superclass: &Option<Expr>,
-        methods: &[Stmt],
-    ) {
+    fn visit_class_stmt(&mut self, name: &Token, superclass: &Option<Expr>, methods: &[Stmt]) {
         let enclosing_in_class = self.in_class;
         let enclosing_context = self.class_context;
 
@@ -356,4 +345,3 @@ impl StmtVisitor<()> for DeclarationCheck {
         self.class_context = enclosing_context;
     }
 }
- 

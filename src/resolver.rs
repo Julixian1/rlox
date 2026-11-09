@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
- 
+
 use crate::expr::{Expr, ExprVisitor, LiteralValue};
 use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::Token;
- 
+
 #[derive(Copy, Clone, PartialEq)]
 enum ClassType {
     None,
@@ -16,7 +16,7 @@ pub struct Resolver {
     pub locals: HashMap<*const Expr, usize>,
     current_class: ClassType,
 }
- 
+
 impl Resolver {
     pub fn new() -> Self {
         Resolver {
@@ -25,21 +25,21 @@ impl Resolver {
             current_class: ClassType::None,
         }
     }
- 
+
     fn begin_scope(&mut self) {
         self.scopes.push(HashSet::new());
     }
- 
+
     fn end_scope(&mut self) {
         self.scopes.pop();
     }
- 
+
     fn declare(&mut self, name: &Token) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.lexeme.clone());
         }
     }
- 
+
     fn resolve_local(&mut self, expr_ptr: *const Expr, name: &Token) {
         for (i, scope) in self.scopes.iter().rev().enumerate() {
             if scope.contains(&name.lexeme) {
@@ -49,7 +49,7 @@ impl Resolver {
         }
         // No encontrada en ningún scope local → es global, no se registra.
     }
- 
+
     fn resolve_function(&mut self, params: &[Token], body: &[Stmt]) {
         self.begin_scope();
         for param in params {
@@ -58,17 +58,17 @@ impl Resolver {
         self.resolve_stmts(body);
         self.end_scope();
     }
- 
+
     pub fn resolve_stmts(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             self.resolve_stmt(stmt);
         }
     }
- 
+
     fn resolve_stmt(&mut self, stmt: &Stmt) {
         stmt.accept(self);
     }
- 
+
     pub fn resolve_expr(&mut self, expr: &Expr) {
         let ptr = expr as *const Expr;
         match expr {
@@ -118,21 +118,21 @@ impl Resolver {
         }
     }
 }
- 
+
 impl StmtVisitor<()> for Resolver {
     fn visit_block_stmt(&mut self, statements: &[Stmt]) {
         self.begin_scope();
         self.resolve_stmts(statements);
         self.end_scope();
     }
- 
+
     fn visit_var_stmt(&mut self, name: &Token, initializer: &Option<Expr>) {
         self.declare(name);
         if let Some(init) = initializer {
             self.resolve_expr(init);
         }
     }
- 
+
     fn visit_function_stmt(
         &mut self,
         name: &Token,
@@ -142,11 +142,11 @@ impl StmtVisitor<()> for Resolver {
         self.declare(name);
         self.resolve_function(params, body);
     }
- 
+
     fn visit_expression_stmt(&mut self, expression: &Expr) {
         self.resolve_expr(expression);
     }
- 
+
     fn visit_if_stmt(
         &mut self,
         condition: &Expr,
@@ -159,28 +159,23 @@ impl StmtVisitor<()> for Resolver {
             self.resolve_stmt(else_stmt);
         }
     }
- 
+
     fn visit_print_stmt(&mut self, expression: &Expr) {
         self.resolve_expr(expression);
     }
- 
+
     fn visit_return_stmt(&mut self, _keyword: &Token, value: &Option<Expr>) {
         if let Some(expr) = value {
             self.resolve_expr(expr);
         }
     }
- 
+
     fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) {
         self.resolve_expr(condition);
         self.resolve_stmt(body);
     }
 
-    fn visit_class_stmt(
-        &mut self,
-        name: &Token,
-        superclass: &Option<Expr>,
-        methods: &[Stmt],
-    ) {
+    fn visit_class_stmt(&mut self, name: &Token, superclass: &Option<Expr>, methods: &[Stmt]) {
         let enclosing_class = self.current_class;
         self.current_class = ClassType::Class;
 
@@ -214,7 +209,7 @@ impl StmtVisitor<()> for Resolver {
         self.current_class = enclosing_class;
     }
 }
- 
+
 impl ExprVisitor<()> for Resolver {
     fn visit_literal_expr(&mut self, _value: &LiteralValue) {}
     fn visit_unary_expr(&mut self, _operator: &Token, right: &Expr) {
@@ -259,4 +254,3 @@ impl ExprVisitor<()> for Resolver {
         self.resolve_local(expr as *const Expr, keyword);
     }
 }
- 

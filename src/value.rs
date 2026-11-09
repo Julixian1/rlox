@@ -35,7 +35,7 @@ impl PartialEq for Value {
         }
     }
 }
- 
+
 impl Value {
     /// Determina si un valor de Lox se evalúa como verdadero (truthy).
     ///
@@ -48,7 +48,7 @@ impl Value {
         }
     }
 }
- 
+
 impl fmt::Display for Value {
     /// Formatea el valor para su representación textual en salida estándar (ej. en `print`).
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -65,7 +65,7 @@ impl fmt::Display for Value {
         }
     }
 }
- 
+
 impl From<&LiteralValue> for Value {
     /// Convierte un `LiteralValue` del AST a un `Value` del entorno de ejecución.
     fn from(literal: &LiteralValue) -> Self {
@@ -77,4 +77,3 @@ impl From<&LiteralValue> for Value {
         }
     }
 }
- 

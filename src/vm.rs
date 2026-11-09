@@ -4,9 +4,9 @@ use crate::value::Value;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::rc::Rc;
- 
+
 const FRAMES_MAX: usize = 100_000;
- 
+
 pub struct Vm<W: Write> {
     stack: Vec<Value>,
     frames: Vec<CallFrame>,
@@ -14,13 +14,13 @@ pub struct Vm<W: Write> {
     open_upvalues: Vec<UpvalueRef>,
     out: W,
 }
- 
+
 impl Vm<io::Stdout> {
     pub fn new() -> Self {
         Self::with_output(io::stdout())
     }
 }
- 
+
 impl<W: Write> Vm<W> {
     pub fn with_output(out: W) -> Self {
         Vm {
@@ -31,11 +31,11 @@ impl<W: Write> Vm<W> {
             out,
         }
     }
- 
+
     pub fn into_output(self) -> W {
         self.out
     }
- 
+
     pub fn interpret(&mut self, script: Rc<FnProto>) -> Result<(), String> {
         self.reset();
         let closure = Rc::new(Closure::new(script));
@@ -47,36 +47,36 @@ impl<W: Write> Vm<W> {
         }
         result
     }
- 
+
     fn reset(&mut self) {
         self.stack.clear();
         self.frames.clear();
         self.open_upvalues.clear();
     }
- 
+
     fn pop(&mut self) -> Value {
         self.stack
             .pop()
             .expect("stack underflow: el compiler emitió bytecode inválido")
     }
- 
+
     fn peek(&self) -> &Value {
         self.stack
             .last()
             .expect("stack vacío: el compiler emitió bytecode inválido")
     }
- 
+
     fn name_at(chunk: &Chunk, index: u16) -> &str {
         match &chunk.constants[index as usize] {
             Value::String(s) => s,
             other => unreachable!("el nombre de un global debe ser string, no {other:?}"),
         }
     }
- 
+
     fn error(chunk: &Chunk, ip: usize, msg: &str) -> String {
         format!("[line {}] {}", chunk.lines[ip - 1], msg)
     }
- 
+
     fn numeric(
         &mut self,
         chunk: &Chunk,
@@ -93,14 +93,14 @@ impl<W: Write> Vm<W> {
             _ => Err(Self::error(chunk, ip, "Operands must be numbers.")),
         }
     }
- 
+
     fn open_index(upvalue: &UpvalueRef) -> usize {
         upvalue
             .borrow()
             .open_index()
             .expect("un upvalue cerrado no puede estar en la lista de abiertos")
     }
- 
+
     fn capture_upvalue(&mut self, stack_index: usize) -> UpvalueRef {
         match self
             .open_upvalues
@@ -114,7 +114,7 @@ impl<W: Write> Vm<W> {
             }
         }
     }
- 
+
     fn close_upvalues(&mut self, last: usize) {
         while self
             .open_upvalues
@@ -125,12 +125,12 @@ impl<W: Write> Vm<W> {
             upvalue.borrow_mut().close(&self.stack);
         }
     }
- 
+
     fn run(&mut self) -> Result<(), String> {
         let mut closure = Rc::clone(&self.frames.last().expect("no hay frame").closure);
         let mut ip = 0;
         let mut base = 0;
- 
+
         loop {
             let chunk = &closure.proto.chunk;
             let op = chunk.code[ip];
@@ -143,7 +143,7 @@ impl<W: Write> Vm<W> {
                 OpCode::Pop => {
                     self.pop();
                 }
- 
+
                 // Los slots son relativos a la base del frame actual.
                 OpCode::GetLocal(slot) => {
                     let value = self.stack[base + slot as usize].clone();
@@ -195,7 +195,7 @@ impl<W: Write> Vm<W> {
                         .borrow_mut()
                         .set(&mut self.stack, value);
                 }
- 
+
                 OpCode::Equal => {
                     let b = self.pop();
                     let a = self.pop();
@@ -235,7 +235,7 @@ impl<W: Write> Vm<W> {
                     Some(Value::Number(n)) => *n = -*n,
                     _ => return Err(Self::error(chunk, ip, "Operand must be a number.")),
                 },
- 
+
                 OpCode::Print => {
                     let value = self.pop();
                     writeln!(self.out, "{}", value).map_err(|e| e.to_string())?;
@@ -247,7 +247,7 @@ impl<W: Write> Vm<W> {
                     }
                 }
                 OpCode::Loop(offset) => ip -= offset as usize,
- 
+
                 OpCode::Call(argc) => {
                     let argc = argc as usize;
                     // El callee está debajo de sus argumentos.
@@ -266,11 +266,7 @@ impl<W: Write> Vm<W> {
                         return Err(Self::error(
                             chunk,
                             ip,
-                            &format!(
-                                "Expected {} arguments but got {}.",
-                                callee.arity(),
-                                argc
-                            ),
+                            &format!("Expected {} arguments but got {}.", callee.arity(), argc),
                         ));
                     }
                     if self.frames.len() >= FRAMES_MAX {
@@ -289,7 +285,7 @@ impl<W: Write> Vm<W> {
                     };
                     let slot = self.stack.len();
                     self.stack.push(Value::Nil);
- 
+
                     let mut upvalues = Vec::with_capacity(proto.upvalue_count());
                     for desc in &proto.upvalues {
                         let upvalue = if desc.is_local {
@@ -310,10 +306,10 @@ impl<W: Write> Vm<W> {
                     let frame = self.frames.pop().expect("no hay frame");
                     self.close_upvalues(frame.base);
                     self.stack.truncate(frame.base);
- 
+
                     let caller = match self.frames.last() {
                         Some(caller) => caller,
-                        None => return Ok(()), 
+                        None => return Ok(()),
                     };
                     self.stack.push(result);
                     closure = Rc::clone(&caller.closure);

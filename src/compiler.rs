@@ -5,21 +5,21 @@ use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::{Token, TokenType};
 use crate::value::Value;
 use std::rc::Rc;
- 
+
 type CResult = Result<(), String>;
- 
+
 struct Local {
     name: String,
     depth: usize,
     is_captured: bool,
 }
- 
+
 struct FnState {
     proto: FnProto,
     locals: Vec<Local>,
     scope_depth: usize,
 }
- 
+
 impl FnState {
     fn new(name: Option<String>) -> Self {
         FnState {
@@ -32,27 +32,27 @@ impl FnState {
             scope_depth: 0,
         }
     }
- 
+
     fn resolve_local(&self, name: &str) -> Option<usize> {
         self.locals.iter().rposition(|l| l.name == name)
     }
 }
- 
+
 enum Var {
     Local(u16),
     Upvalue(u16),
     Global,
 }
- 
+
 pub struct Compiler {
     fns: Vec<FnState>,
     line: usize,
 }
- 
+
 pub fn compile(statements: &[Stmt]) -> Result<Rc<FnProto>, String> {
     Compiler::new().compile(statements)
 }
- 
+
 impl Compiler {
     pub fn new() -> Self {
         Compiler {
@@ -60,7 +60,7 @@ impl Compiler {
             line: 1,
         }
     }
- 
+
     pub fn compile(mut self, statements: &[Stmt]) -> Result<Rc<FnProto>, String> {
         for stmt in statements {
             stmt.accept(&mut self)?;
@@ -70,31 +70,31 @@ impl Compiler {
         let script = self.fns.pop().expect("falta el estado del script");
         Ok(Rc::new(script.proto))
     }
- 
+
     // ---- helpers de emisión --------------------------------------------
- 
+
     fn state(&mut self) -> &mut FnState {
         self.fns.last_mut().expect("pila de funciones vacía")
     }
- 
+
     fn chunk(&mut self) -> &mut Chunk {
         &mut self.state().proto.chunk
     }
- 
+
     fn emit(&mut self, op: OpCode) -> usize {
         let line = self.line;
         self.chunk().write(op, line)
     }
- 
+
     fn error(&self, msg: &str) -> String {
         format!("[line {}] Error: {}", self.line, msg)
     }
- 
+
     fn make_constant(&mut self, value: Value) -> Result<u16, String> {
         let result = self.chunk().add_constant(value);
         result.map_err(|_| self.error("Too many constants in one chunk."))
     }
- 
+
     fn identifier_constant(&mut self, name: &str) -> Result<u16, String> {
         let existing = self
             .chunk()
@@ -106,29 +106,29 @@ impl Compiler {
             None => self.make_constant(Value::String(name.to_string())),
         }
     }
- 
+
     fn emit_jump(&mut self, op: OpCode) -> usize {
         let line = self.line;
         self.chunk().emit_jump(op, line)
     }
- 
+
     fn patch_jump(&mut self, at: usize) -> CResult {
         let result = self.chunk().patch_jump(at);
         result.map_err(|_| self.error("Too much code to jump over."))
     }
- 
+
     fn emit_loop(&mut self, loop_start: usize) -> CResult {
         let line = self.line;
         let result = self.chunk().emit_loop(loop_start, line);
         result.map_err(|_| self.error("Loop body too large."))
     }
- 
+
     // ---- scopes y locales ----------------------------------------------
- 
+
     fn begin_scope(&mut self) {
         self.state().scope_depth += 1;
     }
- 
+
     fn end_scope(&mut self) {
         self.state().scope_depth -= 1;
         loop {
@@ -145,7 +145,7 @@ impl Compiler {
             });
         }
     }
- 
+
     fn add_local(&mut self, name: &Token) -> CResult {
         if self.state().locals.len() > u16::MAX as usize {
             return Err(self.error("Too many local variables."));
@@ -158,9 +158,9 @@ impl Compiler {
         });
         Ok(())
     }
- 
+
     // ---- resolución de variables ---------------------------------------
- 
+
     fn resolve_variable(&mut self, name: &str) -> Result<Var, String> {
         let current = self.fns.len() - 1;
         if let Some(slot) = self.fns[current].resolve_local(name) {
@@ -171,13 +171,13 @@ impl Compiler {
         }
         Ok(Var::Global)
     }
- 
+
     fn resolve_upvalue(&mut self, level: usize, name: &str) -> Result<Option<u16>, String> {
         if level == 0 {
-            return Ok(None); 
+            return Ok(None);
         }
         let enclosing = level - 1;
- 
+
         let desc = if let Some(slot) = self.fns[enclosing].resolve_local(name) {
             self.fns[enclosing].locals[slot].is_captured = true;
             UpvalueDesc {
@@ -192,7 +192,7 @@ impl Compiler {
         } else {
             return Ok(None);
         };
- 
+
         let index = self.fns[level].proto.add_upvalue(desc);
         if index > u16::MAX as usize {
             return Err(self.error("Too many closure variables in function."));
@@ -200,7 +200,7 @@ impl Compiler {
         Ok(Some(index as u16))
     }
 }
- 
+
 impl ExprVisitor<CResult> for Compiler {
     fn visit_literal_expr(&mut self, value: &LiteralValue) -> CResult {
         match value {
@@ -224,7 +224,7 @@ impl ExprVisitor<CResult> for Compiler {
         }
         Ok(())
     }
- 
+
     fn visit_unary_expr(&mut self, operator: &Token, right: &Expr) -> CResult {
         right.accept(self)?;
         self.line = operator.line;
@@ -232,15 +232,14 @@ impl ExprVisitor<CResult> for Compiler {
             TokenType::Minus => self.emit(OpCode::Negate),
             TokenType::Bang => self.emit(OpCode::Not),
             _ => {
-                return Err(self.error(&format!(
-                    "Unexpected unary operator '{}'.",
-                    operator.lexeme
-                )));
+                return Err(
+                    self.error(&format!("Unexpected unary operator '{}'.", operator.lexeme))
+                );
             }
         };
         Ok(())
     }
- 
+
     fn visit_binary_expr(&mut self, left: &Expr, operator: &Token, right: &Expr) -> CResult {
         left.accept(self)?;
         right.accept(self)?;
@@ -291,11 +290,11 @@ impl ExprVisitor<CResult> for Compiler {
         }
         Ok(())
     }
- 
+
     fn visit_grouping_expr(&mut self, expression: &Expr) -> CResult {
         expression.accept(self)
     }
- 
+
     fn visit_variable_expr(&mut self, name: &Token) -> CResult {
         self.line = name.line;
         match self.resolve_variable(&name.lexeme)? {
@@ -312,7 +311,7 @@ impl ExprVisitor<CResult> for Compiler {
         }
         Ok(())
     }
- 
+
     fn visit_assign_expr(&mut self, name: &Token, value: &Expr) -> CResult {
         value.accept(self)?;
         self.line = name.line;
@@ -330,7 +329,7 @@ impl ExprVisitor<CResult> for Compiler {
         }
         Ok(())
     }
- 
+
     fn visit_logical_expr(&mut self, left: &Expr, operator: &Token, right: &Expr) -> CResult {
         left.accept(self)?;
         self.line = operator.line;
@@ -354,7 +353,7 @@ impl ExprVisitor<CResult> for Compiler {
         }
         Ok(())
     }
- 
+
     fn visit_call_expr(&mut self, callee: &Expr, paren: &Token, arguments: &[Expr]) -> CResult {
         callee.accept(self)?;
         for arg in arguments {
@@ -388,20 +387,20 @@ impl ExprVisitor<CResult> for Compiler {
         Err(self.error("Classes and inheritance are not supported in VM backend."))
     }
 }
- 
+
 impl StmtVisitor<CResult> for Compiler {
     fn visit_expression_stmt(&mut self, expression: &Expr) -> CResult {
         expression.accept(self)?;
         self.emit(OpCode::Pop);
         Ok(())
     }
- 
+
     fn visit_print_stmt(&mut self, expression: &Expr) -> CResult {
         expression.accept(self)?;
         self.emit(OpCode::Print);
         Ok(())
     }
- 
+
     fn visit_var_stmt(&mut self, name: &Token, initializer: &Option<Expr>) -> CResult {
         self.line = name.line;
         match initializer {
@@ -418,7 +417,7 @@ impl StmtVisitor<CResult> for Compiler {
         }
         Ok(())
     }
- 
+
     fn visit_block_stmt(&mut self, statements: &[Stmt]) -> CResult {
         self.begin_scope();
         for stmt in statements {
@@ -427,7 +426,7 @@ impl StmtVisitor<CResult> for Compiler {
         self.end_scope();
         Ok(())
     }
- 
+
     fn visit_if_stmt(
         &mut self,
         condition: &Expr,
@@ -446,7 +445,7 @@ impl StmtVisitor<CResult> for Compiler {
         }
         self.patch_jump(else_jump)
     }
- 
+
     fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) -> CResult {
         let loop_start = self.chunk().code.len();
         condition.accept(self)?;
@@ -458,7 +457,7 @@ impl StmtVisitor<CResult> for Compiler {
         self.emit(OpCode::Pop);
         Ok(())
     }
- 
+
     fn visit_function_stmt(
         &mut self,
         name: &Token,
@@ -469,12 +468,12 @@ impl StmtVisitor<CResult> for Compiler {
         if params.len() > u8::MAX as usize {
             return Err(self.error("Can't have more than 255 parameters."));
         }
- 
+
         let is_local = self.state().scope_depth > 0;
         if is_local {
             self.add_local(name)?;
         }
- 
+
         let mut state = FnState::new(Some(name.lexeme.clone()));
         state.scope_depth = 1;
         state.proto.arity = params.len();
@@ -486,26 +485,26 @@ impl StmtVisitor<CResult> for Compiler {
             });
         }
         self.fns.push(state);
- 
+
         for stmt in body.iter() {
             stmt.accept(self)?;
         }
-        
+
         self.emit(OpCode::Nil);
         self.emit(OpCode::Return);
- 
+
         let state = self.fns.pop().expect("falta el estado de la función");
         self.line = name.line;
         let k = self.make_constant(Value::Proto(Rc::new(state.proto)))?;
         self.emit(OpCode::Closure(k));
- 
+
         if !is_local {
             let global = self.identifier_constant(&name.lexeme)?;
             self.emit(OpCode::DefineGlobal(global));
         }
         Ok(())
     }
- 
+
     fn visit_return_stmt(&mut self, keyword: &Token, value: &Option<Expr>) -> CResult {
         self.line = keyword.line;
         if self.fns.len() == 1 {
