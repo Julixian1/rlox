@@ -126,6 +126,33 @@ impl<W: Write> Vm<W> {
         }
     }
 
+    /// Despacha una llamada según el tipo del callee. Los errores se devuelven
+    /// sin línea: `run()` les agrega la posición de la instrucción `Call`.
+    fn call_value(&mut self, callee: Value, argc: usize) -> Result<(), String> {
+        match callee {
+            Value::Closure(closure) => self.call_closure(closure, argc),
+            _ => Err("Can only call functions and classes.".to_string()),
+        }
+    }
+
+    /// Valida aridad y profundidad, y empuja el frame de la closure.
+    /// El callee queda en el slot 0 del frame nuevo.
+    fn call_closure(&mut self, closure: Rc<Closure>, argc: usize) -> Result<(), String> {
+        if closure.arity() != argc {
+            return Err(format!(
+                "Expected {} arguments but got {}.",
+                closure.arity(),
+                argc
+            ));
+        }
+        if self.frames.len() >= FRAMES_MAX {
+            return Err("Stack overflow.".to_string());
+        }
+        let base = self.stack.len() - argc - 1;
+        self.frames.push(CallFrame::new(closure, base));
+        Ok(())
+    }
+
     fn run(&mut self) -> Result<(), String> {
         let mut closure = Rc::clone(&self.frames.last().expect("no hay frame").closure);
         let mut ip = 0;
@@ -252,31 +279,15 @@ impl<W: Write> Vm<W> {
                     let argc = argc as usize;
                     // El callee está debajo de sus argumentos.
                     let callee = self.stack[self.stack.len() - 1 - argc].clone();
-                    let callee = match callee {
-                        Value::Closure(c) => c,
-                        _ => {
-                            return Err(Self::error(
-                                chunk,
-                                ip,
-                                "Can only call functions and classes.",
-                            ));
-                        }
-                    };
-                    if callee.arity() != argc {
-                        return Err(Self::error(
-                            chunk,
-                            ip,
-                            &format!("Expected {} arguments but got {}.", callee.arity(), argc),
-                        ));
-                    }
-                    if self.frames.len() >= FRAMES_MAX {
-                        return Err(Self::error(chunk, ip, "Stack overflow."));
-                    }
                     self.frames.last_mut().expect("no hay frame").ip = ip;
-                    base = self.stack.len() - argc - 1;
-                    self.frames.push(CallFrame::new(Rc::clone(&callee), base));
-                    closure = callee;
-                    ip = 0;
+                    self.call_value(callee, argc)
+                        .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                    // `call_value` puede haber empujado un frame nuevo: se recarga
+                    // el estado cacheado desde el frame que quedó en el tope.
+                    let frame = self.frames.last().expect("no hay frame");
+                    closure = Rc::clone(&frame.closure);
+                    ip = frame.ip;
+                    base = frame.base;
                 }
                 OpCode::Closure(k) => {
                     let proto = match &chunk.constants[k as usize] {
