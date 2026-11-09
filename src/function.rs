@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::class::LoxInstance;
 use crate::environment::Environment;
@@ -8,6 +9,8 @@ use crate::interpreter::Interpreter;
 use crate::stmt::Stmt;
 use crate::token::Token;
 use crate::value::Value;
+
+static NEXT_FUNCTION_ID: AtomicUsize = AtomicUsize::new(0);
 
 /// Señal de control utilizada para propagar valores de retorno o errores durante la ejecución de funciones.
 #[derive(Debug)]
@@ -26,6 +29,7 @@ impl From<String> for ReturnSignal {
 /// Representa una función definida por el usuario en el lenguaje Lox (incluyendo su clausura/closure).
 #[derive(Clone)]
 pub struct LoxFunction {
+    pub id: usize,
     pub name: Token,
     pub params: Vec<Token>,
     pub body: Rc<Vec<Stmt>>,
@@ -43,6 +47,7 @@ impl LoxFunction {
         is_initializer: bool,
     ) -> Self {
         LoxFunction {
+            id: NEXT_FUNCTION_ID.fetch_add(1, Ordering::Relaxed),
             name,
             params,
             body,
@@ -70,6 +75,7 @@ impl LoxFunction {
             .borrow_mut()
             .define("this".to_string(), Value::Instance(instance));
         LoxFunction {
+            id: NEXT_FUNCTION_ID.fetch_add(1, Ordering::Relaxed),
             name: self.name.clone(),
             params: self.params.clone(),
             body: self.body.clone(),
@@ -134,8 +140,8 @@ impl fmt::Debug for LoxFunction {
 }
 
 impl PartialEq for LoxFunction {
-    /// Compara dos funciones por igualdad basándose en sus nombres.
+    /// Compara dos funciones por identidad única (instancia en tiempo de ejecución).
     fn eq(&self, other: &Self) -> bool {
-        self.name.lexeme == other.name.lexeme
+        self.id == other.id
     }
 }

@@ -507,11 +507,7 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
         }
     }
 
-    fn visit_this_expr(
-        &mut self,
-        expr: &Expr,
-        keyword: &Token,
-    ) -> Result<Value, ReturnSignal> {
+    fn visit_this_expr(&mut self, expr: &Expr, keyword: &Token) -> Result<Value, ReturnSignal> {
         self.lookup_variable(expr as *const Expr, keyword)
     }
 
@@ -546,10 +542,16 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
         };
 
         // 2. Obtener la instancia ('this') exactamente un nivel más cerca (distance - 1)
+        let this_distance = distance.checked_sub(1).ok_or_else(|| {
+            ReturnSignal::Error(format!(
+                "[line {}] Internal error: invalid lexical distance for 'super'.",
+                keyword.line
+            ))
+        })?;
         let instance_val = self
             .environment
             .borrow()
-            .get_at(distance - 1, "this")
+            .get_at(this_distance, "this")
             .map_err(ReturnSignal::Error)?;
         let instance = match instance_val {
             Value::Instance(ref inst) => inst.clone(),
