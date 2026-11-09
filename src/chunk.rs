@@ -49,6 +49,7 @@ pub enum OpCode {
 
     // Clases e instancias
     Class(u16),
+    Method(u16),
     GetProperty(u16),
     SetProperty(u16),
     CheckInstance,
@@ -136,6 +137,7 @@ impl Chunk {
             | OpCode::DefineGlobal(i)
             | OpCode::SetGlobal(i)
             | OpCode::Class(i)
+            | OpCode::Method(i)
             | OpCode::GetProperty(i)
             | OpCode::SetProperty(i) => {
                 format!(
@@ -217,6 +219,7 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::SetUpvalue(_) => "OP_SET_UPVALUE",
         OpCode::CloseUpvalue => "OP_CLOSE_UPVALUE",
         OpCode::Class(_) => "OP_CLASS",
+        OpCode::Method(_) => "OP_METHOD",
         OpCode::GetProperty(_) => "OP_GET_PROPERTY",
         OpCode::SetProperty(_) => "OP_SET_PROPERTY",
         OpCode::CheckInstance => "OP_CHECK_INSTANCE",

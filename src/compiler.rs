@@ -14,22 +14,36 @@ struct Local {
     is_captured: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FnKind {
+    Script,
+    Function,
+    Method,
+    Initializer,
+}
+
 struct FnState {
     proto: FnProto,
     locals: Vec<Local>,
     scope_depth: usize,
+    kind: FnKind,
 }
 
 impl FnState {
-    fn new(name: Option<String>) -> Self {
+    fn new(name: Option<String>, kind: FnKind) -> Self {
+        let slot0_name = match kind {
+            FnKind::Method | FnKind::Initializer => "this".to_string(),
+            _ => String::new(),
+        };
         FnState {
             proto: FnProto::new(name),
             locals: vec![Local {
-                name: String::new(),
+                name: slot0_name,
                 depth: 0,
                 is_captured: false,
             }],
             scope_depth: 0,
+            kind,
         }
     }
 
@@ -56,7 +70,7 @@ pub fn compile(statements: &[Stmt]) -> Result<Rc<FnProto>, String> {
 impl Compiler {
     pub fn new() -> Self {
         Compiler {
-            fns: vec![FnState::new(None)],
+            fns: vec![FnState::new(None, FnKind::Script)],
             line: 1,
         }
     }
@@ -198,6 +212,48 @@ impl Compiler {
             return Err(self.error("Too many closure variables in function."));
         }
         Ok(Some(index as u16))
+    }
+
+    fn compile_function_body(
+        &mut self,
+        name: &Token,
+        params: &[Token],
+        body: &[Stmt],
+        kind: FnKind,
+    ) -> CResult {
+        if params.len() > u8::MAX as usize {
+            return Err(self.error("Can't have more than 255 parameters."));
+        }
+
+        let mut state = FnState::new(Some(name.lexeme.clone()), kind);
+        state.scope_depth = 1;
+        state.proto.arity = params.len();
+        for param in params {
+            state.locals.push(Local {
+                name: param.lexeme.clone(),
+                depth: 1,
+                is_captured: false,
+            });
+        }
+        self.fns.push(state);
+
+        for stmt in body {
+            stmt.accept(self)?;
+        }
+
+        if kind == FnKind::Initializer {
+            self.emit(OpCode::GetLocal(0));
+            self.emit(OpCode::Return);
+        } else {
+            self.emit(OpCode::Nil);
+            self.emit(OpCode::Return);
+        }
+
+        let state = self.fns.pop().expect("falta el estado de la función");
+        self.line = name.line;
+        let k = self.make_constant(Value::Proto(Rc::new(state.proto)))?;
+        self.emit(OpCode::Closure(k));
+        Ok(())
     }
 }
 
@@ -395,7 +451,16 @@ impl ExprVisitor<CResult> for Compiler {
 
     fn visit_this_expr(&mut self, _expr: &Expr, keyword: &Token) -> CResult {
         self.line = keyword.line;
-        Err(self.error("Classes and inheritance are not supported in VM backend."))
+        match self.resolve_variable("this")? {
+            Var::Local(slot) => {
+                self.emit(OpCode::GetLocal(slot));
+            }
+            Var::Upvalue(index) => {
+                self.emit(OpCode::GetUpvalue(index));
+            }
+            Var::Global => unreachable!("'this' no puede resolverse como global"),
+        }
+        Ok(())
     }
 
     fn visit_super_expr(&mut self, _expr: &Expr, keyword: &Token, _method: &Token) -> CResult {
@@ -481,38 +546,12 @@ impl StmtVisitor<CResult> for Compiler {
         body: &Rc<Vec<Stmt>>,
     ) -> CResult {
         self.line = name.line;
-        if params.len() > u8::MAX as usize {
-            return Err(self.error("Can't have more than 255 parameters."));
-        }
-
         let is_local = self.state().scope_depth > 0;
         if is_local {
             self.add_local(name)?;
         }
 
-        let mut state = FnState::new(Some(name.lexeme.clone()));
-        state.scope_depth = 1;
-        state.proto.arity = params.len();
-        for param in params {
-            state.locals.push(Local {
-                name: param.lexeme.clone(),
-                depth: 1,
-                is_captured: false,
-            });
-        }
-        self.fns.push(state);
-
-        for stmt in body.iter() {
-            stmt.accept(self)?;
-        }
-
-        self.emit(OpCode::Nil);
-        self.emit(OpCode::Return);
-
-        let state = self.fns.pop().expect("falta el estado de la función");
-        self.line = name.line;
-        let k = self.make_constant(Value::Proto(Rc::new(state.proto)))?;
-        self.emit(OpCode::Closure(k));
+        self.compile_function_body(name, params, body, FnKind::Function)?;
 
         if !is_local {
             let global = self.identifier_constant(&name.lexeme)?;
@@ -526,6 +565,16 @@ impl StmtVisitor<CResult> for Compiler {
         if self.fns.len() == 1 {
             return Err(self.error("Can't return from top-level code."));
         }
+
+        if self.state().kind == FnKind::Initializer {
+            if value.is_some() {
+                return Err(self.error("Can't return a value from an initializer."));
+            }
+            self.emit(OpCode::GetLocal(0));
+            self.emit(OpCode::Return);
+            return Ok(());
+        }
+
         match value {
             Some(expr) => expr.accept(self)?,
             None => {
@@ -543,8 +592,8 @@ impl StmtVisitor<CResult> for Compiler {
         methods: &[Stmt],
     ) -> CResult {
         self.line = name.line;
-        if superclass.is_some() || !methods.is_empty() {
-            return Err(self.error("Methods and inheritance are not supported yet in VM backend."));
+        if superclass.is_some() {
+            return Err(self.error("Inheritance is not supported yet in VM backend."));
         }
 
         let is_local = self.state().scope_depth > 0;
@@ -554,6 +603,24 @@ impl StmtVisitor<CResult> for Compiler {
 
         let name_constant = self.identifier_constant(&name.lexeme)?;
         self.emit(OpCode::Class(name_constant));
+
+        for method in methods {
+            if let Stmt::Function {
+                name: method_name,
+                params,
+                body,
+            } = method
+            {
+                let kind = if method_name.lexeme == "init" {
+                    FnKind::Initializer
+                } else {
+                    FnKind::Method
+                };
+                self.compile_function_body(method_name, params, body, kind)?;
+                let method_k = self.identifier_constant(&method_name.lexeme)?;
+                self.emit(OpCode::Method(method_k));
+            }
+        }
 
         if !is_local {
             let global = self.identifier_constant(&name.lexeme)?;

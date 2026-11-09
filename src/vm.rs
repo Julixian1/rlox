@@ -1,7 +1,7 @@
 use crate::chunk::{Chunk, OpCode};
 use crate::closure::{CallFrame, Closure, FnProto, Upvalue, UpvalueRef};
 use crate::value::Value;
-use crate::vm_class::{VmClass, VmInstance};
+use crate::vm_class::{BoundMethod, VmClass, VmInstance};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -131,14 +131,23 @@ impl<W: Write> Vm<W> {
     fn call_value(&mut self, callee: Value, argc: usize) -> Result<(), String> {
         match callee {
             Value::Closure(closure) => self.call_closure(closure, argc),
+            Value::BoundMethod(bound) => {
+                let slot = self.stack.len() - 1 - argc;
+                self.stack[slot] = bound.receiver.clone();
+                self.call_closure(Rc::clone(&bound.method), argc)
+            }
             Value::VmClass(klass) => {
-                if argc != 0 {
-                    return Err(format!("Expected 0 arguments but got {}.", argc));
-                }
-                let instance = Rc::new(RefCell::new(VmInstance::new(klass)));
+                let instance = Rc::new(RefCell::new(VmInstance::new(klass.clone())));
                 let slot = self.stack.len() - 1 - argc;
                 self.stack[slot] = Value::VmInstance(instance);
-                Ok(())
+
+                if let Some(init) = klass.borrow().methods.get("init").cloned() {
+                    self.call_closure(init, argc)
+                } else if argc != 0 {
+                    Err(format!("Expected 0 arguments but got {}.", argc))
+                } else {
+                    Ok(())
+                }
             }
             _ => Err("Can only call functions and classes.".to_string()),
         }
@@ -323,6 +332,19 @@ impl<W: Write> Vm<W> {
                     self.stack
                         .push(Value::VmClass(Rc::new(RefCell::new(klass))));
                 }
+                OpCode::Method(k) => {
+                    let name = Self::name_at(chunk, k);
+                    let method = match self.pop() {
+                        Value::Closure(c) => c,
+                        _ => unreachable!("OP_METHOD espera una closure"),
+                    };
+                    match self.peek() {
+                        Value::VmClass(klass) => {
+                            klass.borrow_mut().methods.insert(name.to_string(), method);
+                        }
+                        _ => unreachable!("OP_METHOD espera una clase en el tope del stack"),
+                    }
+                }
                 OpCode::CheckInstance => match self.peek() {
                     Value::VmInstance(_) => {}
                     _ => return Err(Self::error(chunk, ip, "Only instances have fields.")),
@@ -335,11 +357,21 @@ impl<W: Write> Vm<W> {
                             if let Some(val) = instance.borrow().fields.get(name) {
                                 self.stack.push(val.clone());
                             } else {
-                                return Err(Self::error(
-                                    chunk,
-                                    ip,
-                                    &format!("Undefined property '{}'.", name),
-                                ));
+                                let method_opt = {
+                                    let class = Rc::clone(&instance.borrow().class);
+                                    class.borrow().methods.get(name).cloned()
+                                };
+                                if let Some(method) = method_opt {
+                                    let bound =
+                                        BoundMethod::new(Value::VmInstance(instance), method);
+                                    self.stack.push(Value::BoundMethod(Rc::new(bound)));
+                                } else {
+                                    return Err(Self::error(
+                                        chunk,
+                                        ip,
+                                        &format!("Undefined property '{}'.", name),
+                                    ));
+                                }
                             }
                         }
                         _ => return Err(Self::error(chunk, ip, "Only instances have properties.")),

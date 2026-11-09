@@ -658,3 +658,433 @@ fn test_vm_set_evaluation_order_aborts_before_value() {
         "El efecto secundario se ejecutó indebidamente"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Métodos, this e inicializadores (Etapa 4)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_vm_method_declaration_and_invocation() {
+    let source = "
+    class Greeter {
+        greet() {
+            print \"hola mundo\";
+        }
+    }
+    var g = Greeter();
+    g.greet();
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "hola mundo\n");
+}
+
+#[test]
+fn test_vm_method_access_and_modify_fields_via_this() {
+    let source = "
+    class Cake {
+        setFlavor(flavor) {
+            this.flavor = flavor;
+        }
+        describe() {
+            print \"Pastel de \" + this.flavor;
+        }
+    }
+    var cake = Cake();
+    cake.setFlavor(\"chocolate\");
+    cake.describe();
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "Pastel de chocolate\n");
+}
+
+#[test]
+fn test_vm_extracted_method_retains_receiver() {
+    let source = "
+    class Person {
+        sayName() {
+            print this.name;
+        }
+    }
+    var p = Person();
+    p.name = \"Alice\";
+    var fn_ptr = p.sayName;
+    fn_ptr();
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "Alice\n");
+}
+
+#[test]
+fn test_vm_field_shadows_method() {
+    let source = "
+    class Foo {
+        bar() {
+            print \"metodo\";
+        }
+    }
+    var foo = Foo();
+    foo.bar = \"campo\";
+    print foo.bar;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "campo\n");
+}
+
+#[test]
+fn test_vm_initializer_with_arguments_and_implicit_return() {
+    let source = "
+    class Point {
+        init(x, y) {
+            this.x = x;
+            this.y = y;
+        }
+    }
+    var p = Point(3, 4);
+    print p.x;
+    print p.y;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "3\n4\n");
+}
+
+#[test]
+fn test_vm_initializer_explicit_empty_return() {
+    let source = "
+    class Foo {
+        init(early) {
+            this.val = \"normal\";
+            if (early) return;
+            this.val = \"modificado\";
+        }
+    }
+    var f1 = Foo(true);
+    var f2 = Foo(false);
+    print f1.val;
+    print f2.val;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "normal\nmodificado\n");
+}
+
+#[test]
+fn test_vm_initializer_direct_invocation_returns_instance() {
+    let source = "
+    class Foo {
+        init(val) {
+            this.val = val;
+        }
+    }
+    var foo = Foo(1);
+    print foo.val;
+    var ret = foo.init(2);
+    print foo.val;
+    print ret.val;
+    print foo == ret;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "1\n2\n2\ntrue\n");
+}
+
+#[test]
+fn test_vm_initializer_wrong_arity() {
+    let source = "
+    class Foo {
+        init(a, b) {}
+    }
+    Foo(1);
+    ";
+    let result = run_vm(source);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .contains("Expected 2 arguments but got 1.")
+    );
+}
+
+#[test]
+fn test_vm_this_captured_by_nested_function() {
+    let source = "
+    class Counter {
+        init() {
+            this.count = 0;
+        }
+        getIncrementer() {
+            fun inc() {
+                this.count = this.count + 1;
+                return this.count;
+            }
+            return inc;
+        }
+    }
+    var c = Counter();
+    var inc = c.getIncrementer();
+    print inc();
+    print inc();
+    print c.count;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "1\n2\n2\n");
+}
+
+#[test]
+fn test_vm_normal_function_inside_initializer_can_return_value() {
+    let source = "
+    class Foo {
+        init() {
+            fun helper() {
+                return 42;
+            }
+            this.val = helper();
+        }
+    }
+    var f = Foo();
+    print f.val;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "42\n");
+}
+
+#[test]
+fn test_vm_initializer_propagates_runtime_error() {
+    let source = "
+    class Foo {
+        init() {
+            var x = \"bad\" - 5;
+        }
+    }
+    Foo();
+    ";
+    let result = run_vm(source);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Operands must be numbers."));
+}
+
+#[test]
+fn test_vm_bound_methods_compared_by_identity() {
+    let source = "
+    class Foo {
+        method() {}
+    }
+    var foo = Foo();
+    var m1 = foo.method;
+    var m2 = foo.method;
+    print m1 == m1;
+    print m1 == m2;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "true\nfalse\n");
+}
+
+// ---------------------------------------------------------------------------
+// Métodos, this e inicializadores (Etapa 4)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_vm_method_declaration_and_invocation() {
+    let source = "
+    class Greeter {
+        greet() {
+            print \"hola mundo\";
+        }
+    }
+    var g = Greeter();
+    g.greet();
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "hola mundo\n");
+}
+
+#[test]
+fn test_vm_method_access_and_modify_fields_via_this() {
+    let source = "
+    class Cake {
+        setFlavor(flavor) {
+            this.flavor = flavor;
+        }
+        describe() {
+            print \"Pastel de \" + this.flavor;
+        }
+    }
+    var cake = Cake();
+    cake.setFlavor(\"chocolate\");
+    cake.describe();
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "Pastel de chocolate\n");
+}
+
+#[test]
+fn test_vm_extracted_method_retains_receiver() {
+    let source = "
+    class Person {
+        sayName() {
+            print this.name;
+        }
+    }
+    var p = Person();
+    p.name = \"Alice\";
+    var fn_ptr = p.sayName;
+    fn_ptr();
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "Alice\n");
+}
+
+#[test]
+fn test_vm_field_shadows_method() {
+    let source = "
+    class Foo {
+        bar() {
+            print \"metodo\";
+        }
+    }
+    var foo = Foo();
+    foo.bar = \"campo\";
+    print foo.bar;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "campo\n");
+}
+
+#[test]
+fn test_vm_initializer_with_arguments_and_implicit_return() {
+    let source = "
+    class Point {
+        init(x, y) {
+            this.x = x;
+            this.y = y;
+        }
+    }
+    var p = Point(3, 4);
+    print p.x;
+    print p.y;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "3\n4\n");
+}
+
+#[test]
+fn test_vm_initializer_explicit_empty_return() {
+    let source = "
+    class Foo {
+        init(early) {
+            this.val = \"normal\";
+            if (early) return;
+            this.val = \"modificado\";
+        }
+    }
+    var f1 = Foo(true);
+    var f2 = Foo(false);
+    print f1.val;
+    print f2.val;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "normal\nmodificado\n");
+}
+
+#[test]
+fn test_vm_initializer_direct_invocation_returns_instance() {
+    let source = "
+    class Foo {
+        init(val) {
+            this.val = val;
+        }
+    }
+    var foo = Foo(1);
+    print foo.val;
+    var ret = foo.init(2);
+    print foo.val;
+    print ret.val;
+    print foo == ret;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "1\n2\n2\ntrue\n");
+}
+
+#[test]
+fn test_vm_initializer_wrong_arity() {
+    let source = "
+    class Foo {
+        init(a, b) {}
+    }
+    Foo(1);
+    ";
+    let result = run_vm(source);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Expected 2 arguments but got 1."));
+}
+
+#[test]
+fn test_vm_this_captured_by_nested_function() {
+    let source = "
+    class Counter {
+        init() {
+            this.count = 0;
+        }
+        getIncrementer() {
+            fun inc() {
+                this.count = this.count + 1;
+                return this.count;
+            }
+            return inc;
+        }
+    }
+    var c = Counter();
+    var inc = c.getIncrementer();
+    print inc();
+    print inc();
+    print c.count;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "1\n2\n2\n");
+}
+
+#[test]
+fn test_vm_normal_function_inside_initializer_can_return_value() {
+    let source = "
+    class Foo {
+        init() {
+            fun helper() {
+                return 42;
+            }
+            this.val = helper();
+        }
+    }
+    var f = Foo();
+    print f.val;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "42\n");
+}
+
+#[test]
+fn test_vm_initializer_propagates_runtime_error() {
+    let source = "
+    class Foo {
+        init() {
+            var x = \"bad\" - 5;
+        }
+    }
+    Foo();
+    ";
+    let result = run_vm(source);
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Operands must be numbers."));
+}
+
+#[test]
+fn test_vm_bound_methods_compared_by_identity() {
+    let source = "
+    class Foo {
+        method() {}
+    }
+    var foo = Foo();
+    var m1 = foo.method;
+    var m2 = foo.method;
+    print m1 == m1;
+    print m1 == m2;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "true\nfalse\n");
+}
