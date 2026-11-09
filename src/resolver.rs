@@ -4,9 +4,18 @@ use crate::expr::{Expr, ExprVisitor, LiteralValue};
 use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::Token;
  
+#[derive(Copy, Clone, PartialEq)]
+#[allow(dead_code)]
+enum ClassType {
+    None,
+    Class,
+    Subclass,
+}
+
 pub struct Resolver {
     scopes: Vec<HashSet<String>>,
     pub locals: HashMap<*const Expr, usize>,
+    current_class: ClassType,
 }
  
 impl Resolver {
@@ -14,6 +23,7 @@ impl Resolver {
         Resolver {
             scopes: Vec::new(),
             locals: HashMap::new(),
+            current_class: ClassType::None,
         }
     }
  
@@ -100,7 +110,9 @@ impl Resolver {
                 self.resolve_expr(value);
                 self.resolve_expr(object);
             }
-            Expr::This { .. } => {}
+            Expr::This { keyword } => {
+                self.resolve_local(ptr, keyword);
+            }
             Expr::Super { .. } => {}
         }
     }
@@ -168,13 +180,26 @@ impl StmtVisitor<()> for Resolver {
         superclass: &Option<Expr>,
         methods: &[Stmt],
     ) {
+        let enclosing_class = self.current_class;
+        self.current_class = ClassType::Class;
+
         self.declare(name);
+
         if let Some(super_expr) = superclass {
             self.resolve_expr(super_expr);
         }
+
+        self.begin_scope();
+        self.scopes.last_mut().unwrap().insert("this".to_string());
+
         for method in methods {
-            self.resolve_stmt(method);
+            if let Stmt::Function { params, body, .. } = method {
+                self.resolve_function(params, body);
+            }
         }
+
+        self.end_scope();
+        self.current_class = enclosing_class;
     }
 }
  
@@ -214,7 +239,9 @@ impl ExprVisitor<()> for Resolver {
         self.resolve_expr(object);
     }
 
-    fn visit_this_expr(&mut self, _expr: &Expr, _keyword: &Token) {}
+    fn visit_this_expr(&mut self, expr: &Expr, keyword: &Token) {
+        self.resolve_local(expr as *const Expr, keyword);
+    }
 
     fn visit_super_expr(&mut self, _expr: &Expr, _keyword: &Token, _method: &Token) {}
 }

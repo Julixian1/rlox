@@ -237,13 +237,47 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
     fn visit_class_stmt(
         &mut self,
         name: &Token,
-        _superclass: &Option<Expr>,
-        _methods: &[Stmt],
+        superclass: &Option<Expr>,
+        methods: &[Stmt],
     ) -> Result<(), ReturnSignal> {
-        Err(ReturnSignal::Error(format!(
-            "[line {}] Runtime support for classes is not yet available.",
-            name.line
-        )))
+        self.environment
+            .borrow_mut()
+            .define(name.lexeme.clone(), Value::Nil);
+
+        if superclass.is_some() {
+            return Err(ReturnSignal::Error(format!(
+                "[line {}] Inheritance is not yet enabled in this stage.",
+                name.line
+            )));
+        }
+
+        let mut methods_map = HashMap::new();
+        for method in methods {
+            if let Stmt::Function {
+                name: m_name,
+                params,
+                body,
+            } = method
+            {
+                let is_initializer = m_name.lexeme == "init";
+                let function = LoxFunction::new(
+                    m_name.clone(),
+                    params.clone(),
+                    body.clone(),
+                    self.environment.clone(),
+                    is_initializer,
+                );
+                methods_map.insert(m_name.lexeme.clone(), function);
+            }
+        }
+
+        let klass = LoxClass::new(name.lexeme.clone(), None, methods_map);
+        self.environment
+            .borrow_mut()
+            .assign(name, Value::Class(Rc::new(RefCell::new(klass))))
+            .map_err(ReturnSignal::Error)?;
+
+        Ok(())
     }
 }
 
@@ -369,53 +403,85 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             args_val.push(self.evaluate(arg)?);
         }
 
-        if let Value::Function(function) = callee_val {
-            if args_val.len() != function.arity() {
-                return Err(ReturnSignal::Error(format!(
-                    "[line {}] Expected {} arguments but got {}.",
-                    paren.line,
-                    function.arity(),
-                    args_val.len()
-                )));
-            }
+        match callee_val {
+            Value::Function(function) => {
+                if args_val.len() != function.arity() {
+                    return Err(ReturnSignal::Error(format!(
+                        "[line {}] Expected {} arguments but got {}.",
+                        paren.line,
+                        function.arity(),
+                        args_val.len()
+                    )));
+                }
 
-            function.call(self, args_val)
-        } else {
-            Err(ReturnSignal::Error(format!(
+                function.call(self, args_val)
+            }
+            Value::Class(klass) => {
+                if args_val.len() != klass.borrow().arity() {
+                    return Err(ReturnSignal::Error(format!(
+                        "[line {}] Expected {} arguments but got {}.",
+                        paren.line,
+                        klass.borrow().arity(),
+                        args_val.len()
+                    )));
+                }
+
+                let instance = Rc::new(RefCell::new(LoxInstance::new(klass.clone())));
+                if let Some(initializer) = klass.borrow().find_method("init") {
+                    initializer.bind(instance.clone()).call(self, args_val)?;
+                }
+
+                Ok(Value::Instance(instance))
+            }
+            _ => Err(ReturnSignal::Error(format!(
                 "[line {}] Can only call functions and classes.",
                 paren.line
+            ))),
+        }
+    }
+
+    fn visit_get_expr(&mut self, object: &Expr, name: &Token) -> Result<Value, ReturnSignal> {
+        let object_val = self.evaluate(object)?;
+        if let Value::Instance(instance) = object_val {
+            LoxInstance::get(&instance, &name.lexeme).ok_or_else(|| {
+                ReturnSignal::Error(format!(
+                    "[line {}] Undefined property '{}'.",
+                    name.line, name.lexeme
+                ))
+            })
+        } else {
+            Err(ReturnSignal::Error(format!(
+                "[line {}] Only instances have properties.",
+                name.line
             )))
         }
     }
 
-    fn visit_get_expr(&mut self, _object: &Expr, name: &Token) -> Result<Value, ReturnSignal> {
-        Err(ReturnSignal::Error(format!(
-            "[line {}] Runtime support for classes is not yet available.",
-            name.line
-        )))
-    }
-
     fn visit_set_expr(
         &mut self,
-        _object: &Expr,
+        object: &Expr,
         name: &Token,
-        _value: &Expr,
+        value: &Expr,
     ) -> Result<Value, ReturnSignal> {
-        Err(ReturnSignal::Error(format!(
-            "[line {}] Runtime support for classes is not yet available.",
-            name.line
-        )))
+        let object_val = self.evaluate(object)?;
+        if let Value::Instance(instance) = object_val {
+            let val = self.evaluate(value)?;
+            instance.borrow_mut().set(name.lexeme.clone(), val.clone());
+            Ok(val)
+        } else {
+            Err(ReturnSignal::Error(format!(
+                "[line {}] Only instances have fields.",
+                name.line
+            )))
+        }
     }
 
     fn visit_this_expr(
         &mut self,
-        _expr: &Expr,
+        expr: &Expr,
         keyword: &Token,
     ) -> Result<Value, ReturnSignal> {
-        Err(ReturnSignal::Error(format!(
-            "[line {}] Runtime support for classes is not yet available.",
-            keyword.line
-        )))
+        self.lookup_variable(expr as *const Expr, keyword)
     }
 
     fn visit_super_expr(

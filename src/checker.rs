@@ -14,15 +14,22 @@ pub fn check(statements: &[Stmt]) -> Vec<String> {
     findings.into_iter().map(|(_, message)| message).collect()
 }
  
+#[derive(Copy, Clone, PartialEq)]
+enum FunctionContext {
+    None,
+    Function,
+    Initializer,
+}
+
 struct ReturnCheck {
-    in_function: bool,
+    context: FunctionContext,
     findings: Vec<Finding>,
 }
  
 impl ReturnCheck {
     fn run(statements: &[Stmt]) -> Vec<Finding> {
         let mut pass = ReturnCheck {
-            in_function: false,
+            context: FunctionContext::None,
             findings: Vec::new(),
         };
         for stmt in statements {
@@ -61,20 +68,28 @@ impl StmtVisitor<()> for ReturnCheck {
     }
  
     fn visit_function_stmt(&mut self, _name: &Token, _params: &[Token], body: &Rc<Vec<Stmt>>) {
-        let enclosing = self.in_function;
-        self.in_function = true;
+        let enclosing = self.context;
+        self.context = FunctionContext::Function;
         for stmt in body.iter() {
             stmt.accept(self);
         }
-        self.in_function = enclosing;
+        self.context = enclosing;
     }
  
-    fn visit_return_stmt(&mut self, keyword: &Token, _value: &Option<Expr>) {
-        if !self.in_function {
+    fn visit_return_stmt(&mut self, keyword: &Token, value: &Option<Expr>) {
+        if self.context == FunctionContext::None {
             self.findings.push((
                 keyword.line,
                 format!(
                     "[line {}] Error at 'return': Can't return from top-level code.",
+                    keyword.line
+                ),
+            ));
+        } else if self.context == FunctionContext::Initializer && value.is_some() {
+            self.findings.push((
+                keyword.line,
+                format!(
+                    "[line {}] Error at 'return': Can't return a value from an initializer.",
                     keyword.line
                 ),
             ));
@@ -88,7 +103,18 @@ impl StmtVisitor<()> for ReturnCheck {
         methods: &[Stmt],
     ) {
         for method in methods {
-            method.accept(self);
+            if let Stmt::Function { name, body, .. } = method {
+                let enclosing = self.context;
+                if name.lexeme == "init" {
+                    self.context = FunctionContext::Initializer;
+                } else {
+                    self.context = FunctionContext::Function;
+                }
+                for stmt in body.iter() {
+                    stmt.accept(self);
+                }
+                self.context = enclosing;
+            }
         }
     }
 }
@@ -97,6 +123,7 @@ impl StmtVisitor<()> for ReturnCheck {
 struct DeclarationCheck {
     scopes: Vec<HashMap<String, bool>>,
     findings: Vec<Finding>,
+    in_class: bool,
 }
  
 impl DeclarationCheck {
@@ -104,6 +131,7 @@ impl DeclarationCheck {
         let mut pass = DeclarationCheck {
             scopes: Vec::new(),
             findings: Vec::new(),
+            in_class: false,
         };
         for stmt in statements {
             stmt.accept(&mut pass);
@@ -179,7 +207,17 @@ impl DeclarationCheck {
                 self.check_expr(object);
                 self.check_expr(value);
             }
-            Expr::This { .. } => {}
+            Expr::This { keyword } => {
+                if !self.in_class {
+                    self.findings.push((
+                        keyword.line,
+                        format!(
+                            "[line {}] Error at 'this': Can't use 'this' outside of a class.",
+                            keyword.line
+                        ),
+                    ));
+                }
+            }
             Expr::Super { .. } => {}
         }
     }
@@ -256,14 +294,29 @@ impl StmtVisitor<()> for DeclarationCheck {
         superclass: &Option<Expr>,
         methods: &[Stmt],
     ) {
+        let enclosing = self.in_class;
+        self.in_class = true;
+
         self.declare(name);
         self.define(name);
         if let Some(super_expr) = superclass {
             self.check_expr(super_expr);
         }
         for method in methods {
-            method.accept(self);
+            if let Stmt::Function { params, body, .. } = method {
+                self.begin_scope();
+                for param in params {
+                    self.declare(param);
+                    self.define(param);
+                }
+                for stmt in body.iter() {
+                    stmt.accept(self);
+                }
+                self.end_scope();
+            }
         }
+
+        self.in_class = enclosing;
     }
 }
  
