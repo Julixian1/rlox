@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io::{self, Write};
 use std::rc::Rc;
 
 use crate::class::{LoxClass, LoxInstance};
@@ -14,6 +15,7 @@ pub struct Interpreter {
     pub globals: Rc<RefCell<Environment>>,
     environment: Rc<RefCell<Environment>>,
     locals: HashMap<*const Expr, usize>,
+    out: Box<dyn Write + Send>,
 }
 
 unsafe impl Send for Interpreter {}
@@ -21,11 +23,17 @@ unsafe impl Send for Interpreter {}
 impl Interpreter {
     /// Crea un nuevo `Interpreter` inicializando los entornos globales e individuales.
     pub fn new() -> Self {
+        Self::with_output(io::stdout())
+    }
+
+    /// Crea un nuevo `Interpreter` con un escritor inyectado para capturar la salida de print.
+    pub fn with_output<W: Write + Send + 'static>(out: W) -> Self {
         let globals = Rc::new(RefCell::new(Environment::new()));
         Interpreter {
             globals: globals.clone(),
             environment: globals,
             locals: HashMap::new(),
+            out: Box::new(out),
         }
     }
 
@@ -154,7 +162,7 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
 
     fn visit_print_stmt(&mut self, expression: &Expr) -> Result<(), ReturnSignal> {
         let value = self.evaluate(expression)?;
-        println!("{}", value);
+        writeln!(self.out, "{}", value).map_err(|e| ReturnSignal::Error(e.to_string()))?;
         Ok(())
     }
 

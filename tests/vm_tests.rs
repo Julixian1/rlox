@@ -441,7 +441,7 @@ fn test_vm_runtime_error_call_wrong_arity() {
 }
 
 // ---------------------------------------------------------------------------
-// Tipos de runtime de la VM (Etapa 2)
+// Tipos de runtime de la VM
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -492,7 +492,7 @@ fn test_vm_runtime_types_display_and_equality() {
 }
 
 // ---------------------------------------------------------------------------
-// Clases, instancias, campos y orden de evaluación en Set (Etapa 3)
+// Clases, instancias, campos y orden de evaluación en Set
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -660,7 +660,7 @@ fn test_vm_set_evaluation_order_aborts_before_value() {
 }
 
 // ---------------------------------------------------------------------------
-// Métodos, this e inicializadores (Etapa 4)
+// Métodos, this e inicializadores
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -877,7 +877,7 @@ fn test_vm_bound_methods_compared_by_identity() {
 }
 
 // ---------------------------------------------------------------------------
-// Herencia y super (Etapa 5)
+// Herencia y super
 // ---------------------------------------------------------------------------
 
 #[test]
