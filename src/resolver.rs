@@ -5,7 +5,6 @@ use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::Token;
  
 #[derive(Copy, Clone, PartialEq)]
-#[allow(dead_code)]
 enum ClassType {
     None,
     Class,
@@ -113,7 +112,9 @@ impl Resolver {
             Expr::This { keyword } => {
                 self.resolve_local(ptr, keyword);
             }
-            Expr::Super { .. } => {}
+            Expr::Super { keyword, .. } => {
+                self.resolve_local(ptr, keyword);
+            }
         }
     }
 }
@@ -186,9 +187,15 @@ impl StmtVisitor<()> for Resolver {
         self.declare(name);
 
         if let Some(super_expr) = superclass {
+            self.current_class = ClassType::Subclass;
             self.resolve_expr(super_expr);
+
+            // Ámbito léxico para "super"
+            self.begin_scope();
+            self.scopes.last_mut().unwrap().insert("super".to_string());
         }
 
+        // Ámbito léxico para "this"
         self.begin_scope();
         self.scopes.last_mut().unwrap().insert("this".to_string());
 
@@ -198,7 +205,12 @@ impl StmtVisitor<()> for Resolver {
             }
         }
 
-        self.end_scope();
+        self.end_scope(); // Cierra "this"
+
+        if superclass.is_some() {
+            self.end_scope(); // Cierra "super"
+        }
+
         self.current_class = enclosing_class;
     }
 }
@@ -243,6 +255,8 @@ impl ExprVisitor<()> for Resolver {
         self.resolve_local(expr as *const Expr, keyword);
     }
 
-    fn visit_super_expr(&mut self, _expr: &Expr, _keyword: &Token, _method: &Token) {}
+    fn visit_super_expr(&mut self, expr: &Expr, keyword: &Token, _method: &Token) {
+        self.resolve_local(expr as *const Expr, keyword);
+    }
 }
  

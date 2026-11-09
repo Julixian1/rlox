@@ -120,10 +120,18 @@ impl StmtVisitor<()> for ReturnCheck {
 }
  
 
+#[derive(Copy, Clone, PartialEq)]
+enum ClassContext {
+    None,
+    Class,
+    Subclass,
+}
+
 struct DeclarationCheck {
     scopes: Vec<HashMap<String, bool>>,
     findings: Vec<Finding>,
     in_class: bool,
+    class_context: ClassContext,
 }
  
 impl DeclarationCheck {
@@ -132,6 +140,7 @@ impl DeclarationCheck {
             scopes: Vec::new(),
             findings: Vec::new(),
             in_class: false,
+            class_context: ClassContext::None,
         };
         for stmt in statements {
             stmt.accept(&mut pass);
@@ -218,7 +227,27 @@ impl DeclarationCheck {
                     ));
                 }
             }
-            Expr::Super { .. } => {}
+            Expr::Super { keyword, .. } => match self.class_context {
+                ClassContext::None => {
+                    self.findings.push((
+                        keyword.line,
+                        format!(
+                            "[line {}] Error at 'super': Can't use 'super' outside of a class.",
+                            keyword.line
+                        ),
+                    ));
+                }
+                ClassContext::Class => {
+                    self.findings.push((
+                        keyword.line,
+                        format!(
+                            "[line {}] Error at 'super': Can't use 'super' in a class with no superclass.",
+                            keyword.line
+                        ),
+                    ));
+                }
+                ClassContext::Subclass => {}
+            },
         }
     }
 }
@@ -294,8 +323,15 @@ impl StmtVisitor<()> for DeclarationCheck {
         superclass: &Option<Expr>,
         methods: &[Stmt],
     ) {
-        let enclosing = self.in_class;
+        let enclosing_in_class = self.in_class;
+        let enclosing_context = self.class_context;
+
         self.in_class = true;
+        self.class_context = if superclass.is_some() {
+            ClassContext::Subclass
+        } else {
+            ClassContext::Class
+        };
 
         self.declare(name);
         self.define(name);
@@ -316,7 +352,8 @@ impl StmtVisitor<()> for DeclarationCheck {
             }
         }
 
-        self.in_class = enclosing;
+        self.in_class = enclosing_in_class;
+        self.class_context = enclosing_context;
     }
 }
  

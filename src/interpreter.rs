@@ -240,17 +240,45 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
         superclass: &Option<Expr>,
         methods: &[Stmt],
     ) -> Result<(), ReturnSignal> {
+        // 1. Placeholder del nombre en el entorno actual
         self.environment
             .borrow_mut()
             .define(name.lexeme.clone(), Value::Nil);
 
-        if superclass.is_some() {
-            return Err(ReturnSignal::Error(format!(
-                "[line {}] Inheritance is not yet enabled in this stage.",
-                name.line
-            )));
-        }
+        // 2. Evaluar y validar la superclase (si existe)
+        let evaluated_superclass = if let Some(superclass_expr) = superclass {
+            let superclass_token = match superclass_expr {
+                Expr::Variable { name } => name,
+                _ => name,
+            };
+            let super_val = self.evaluate(superclass_expr)?;
+            match super_val {
+                Value::Class(ref k) => Some(k.clone()),
+                _ => {
+                    return Err(ReturnSignal::Error(format!(
+                        "[line {}] Superclass must be a class.",
+                        superclass_token.line
+                    )));
+                }
+            }
+        } else {
+            None
+        };
 
+        // 3. Creación del entorno léxico de 'super' (si es subclase)
+        let superclass_env = if let Some(ref super_rc) = evaluated_superclass {
+            let env = Rc::new(RefCell::new(Environment::new_enclosed(
+                self.environment.clone(),
+            )));
+            env.borrow_mut()
+                .define("super".to_string(), Value::Class(super_rc.clone()));
+            Some(env)
+        } else {
+            None
+        };
+
+        // 4. Compilación de métodos con la clausura correspondiente
+        let method_closure = superclass_env.as_ref().unwrap_or(&self.environment).clone();
         let mut methods_map = HashMap::new();
         for method in methods {
             if let Stmt::Function {
@@ -264,14 +292,17 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
                     m_name.clone(),
                     params.clone(),
                     body.clone(),
-                    self.environment.clone(),
+                    method_closure.clone(),
                     is_initializer,
                 );
                 methods_map.insert(m_name.lexeme.clone(), function);
             }
         }
 
-        let klass = LoxClass::new(name.lexeme.clone(), None, methods_map);
+        // 5. Instanciar la clase LoxClass
+        let klass = LoxClass::new(name.lexeme.clone(), evaluated_superclass, methods_map);
+
+        // 6. Asignar la clase final reemplazando el placeholder
         self.environment
             .borrow_mut()
             .assign(name, Value::Class(Rc::new(RefCell::new(klass))))
@@ -486,13 +517,62 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
 
     fn visit_super_expr(
         &mut self,
-        _expr: &Expr,
+        expr: &Expr,
         keyword: &Token,
-        _method: &Token,
+        method: &Token,
     ) -> Result<Value, ReturnSignal> {
-        Err(ReturnSignal::Error(format!(
-            "[line {}] Runtime support for classes is not yet available.",
-            keyword.line
-        )))
+        let ptr = expr as *const Expr;
+        let distance = self.locals.get(&ptr).copied().ok_or_else(|| {
+            ReturnSignal::Error(format!(
+                "[line {}] Internal error: unresolved 'super' reference.",
+                keyword.line
+            ))
+        })?;
+
+        // 1. Obtener superclase a la distancia resuelta
+        let superclass_val = self
+            .environment
+            .borrow()
+            .get_at(distance, "super")
+            .map_err(ReturnSignal::Error)?;
+        let superclass = match superclass_val {
+            Value::Class(ref k) => k.clone(),
+            _ => {
+                return Err(ReturnSignal::Error(format!(
+                    "[line {}] Internal error: 'super' did not resolve to a class.",
+                    keyword.line
+                )));
+            }
+        };
+
+        // 2. Obtener la instancia ('this') exactamente un nivel más cerca (distance - 1)
+        let instance_val = self
+            .environment
+            .borrow()
+            .get_at(distance - 1, "this")
+            .map_err(ReturnSignal::Error)?;
+        let instance = match instance_val {
+            Value::Instance(ref inst) => inst.clone(),
+            _ => {
+                return Err(ReturnSignal::Error(format!(
+                    "[line {}] Internal error: 'this' did not resolve to an instance.",
+                    keyword.line
+                )));
+            }
+        };
+
+        // 3. Buscar método en la superclase (búsqueda recursiva)
+        let method_fn = superclass
+            .borrow()
+            .find_method(&method.lexeme)
+            .ok_or_else(|| {
+                ReturnSignal::Error(format!(
+                    "[line {}] Undefined property '{}'.",
+                    method.line, method.lexeme
+                ))
+            })?;
+
+        // 4. Ligar a la instancia receptora
+        Ok(Value::Function(method_fn.bind(instance)))
     }
 }
