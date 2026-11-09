@@ -490,3 +490,171 @@ fn test_vm_runtime_types_display_and_equality() {
     assert_ne!(val_bound1, val_bound2);
     assert!(val_bound1.is_truthy());
 }
+
+// ---------------------------------------------------------------------------
+// Clases, instancias, campos y orden de evaluación en Set (Etapa 3)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_vm_class_declaration_and_instantiation() {
+    let source = "
+    class Bagel {}
+    print Bagel;
+    var bagel = Bagel();
+    print bagel;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "<class Bagel>\n<instance of Bagel>\n");
+}
+
+#[test]
+fn test_vm_class_local_and_nested_in_function() {
+    let source = "
+    {
+        class LocalClass {}
+        var l = LocalClass();
+        print l;
+    }
+    fun makeInstance() {
+        class FunctionClass {}
+        return FunctionClass();
+    }
+    var f = makeInstance();
+    print f;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(
+        output,
+        "<instance of LocalClass>\n<instance of FunctionClass>\n"
+    );
+}
+
+#[test]
+fn test_vm_field_get_and_set() {
+    let source = "
+    class Box {}
+    var box = Box();
+    box.width = 10;
+    box.height = 20;
+    print box.width;
+    print box.height;
+    print box.width + box.height;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "10\n20\n30\n");
+}
+
+#[test]
+fn test_vm_field_assignment_expression_value() {
+    let source = "
+    class Box {}
+    var box = Box();
+    print box.value = 42;
+    print box.value;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "42\n42\n");
+}
+
+#[test]
+fn test_vm_fields_are_independent_across_instances() {
+    let source = "
+    class Point {}
+    var p1 = Point();
+    var p2 = Point();
+    p1.x = 100;
+    p2.x = 200;
+    print p1.x;
+    print p2.x;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "100\n200\n");
+}
+
+#[test]
+fn test_vm_instances_compared_by_identity() {
+    let source = "
+    class Foo {}
+    var f1 = Foo();
+    var f2 = Foo();
+    print f1 == f1;
+    print f1 == f2;
+    print f1 != f2;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(output, "true\nfalse\ntrue\n");
+}
+
+#[test]
+fn test_vm_error_get_property_on_non_instance() {
+    let source = "\"no es instancia\".propiedad;";
+    let result = run_vm(source);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .contains("Only instances have properties.")
+    );
+}
+
+#[test]
+fn test_vm_error_undefined_property() {
+    let source = "
+    class Foo {}
+    var foo = Foo();
+    print foo.inexistente;
+    ";
+    let result = run_vm(source);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .contains("Undefined property 'inexistente'.")
+    );
+}
+
+#[test]
+fn test_vm_error_class_instantiation_wrong_arity() {
+    let source = "
+    class Foo {}
+    Foo(1, 2);
+    ";
+    let result = run_vm(source);
+    assert!(result.is_err());
+    assert!(
+        result
+            .unwrap_err()
+            .contains("Expected 0 arguments but got 2.")
+    );
+}
+
+#[test]
+fn test_vm_set_evaluation_order_aborts_before_value() {
+    let source = "
+    fun sideEffect() {
+        print \"EFECTO SECUNDARIO EJECUTADO\";
+        return 123;
+    }
+    var x = \"no instancia\";
+    x.campo = sideEffect();
+    ";
+    let mut scanner = Scanner::new(source.to_string());
+    let tokens = scanner.scan_tokens().unwrap();
+    let mut parser = Parser::new(tokens);
+    let statements = parser.parse().unwrap();
+    assert!(checker::check(&statements).is_empty());
+    let proto = compiler::compile(&statements).unwrap();
+
+    let mut output = Vec::new();
+    let result = {
+        let mut vm = Vm::with_output(&mut output);
+        vm.interpret(proto)
+    };
+    assert!(result.is_err());
+    assert!(result.unwrap_err().contains("Only instances have fields."));
+    let stdout = String::from_utf8(output).unwrap();
+    assert!(
+        !stdout.contains("EFECTO SECUNDARIO EJECUTADO"),
+        "El efecto secundario se ejecutó indebidamente"
+    );
+}

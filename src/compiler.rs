@@ -367,14 +367,30 @@ impl ExprVisitor<CResult> for Compiler {
         Ok(())
     }
 
-    fn visit_get_expr(&mut self, _object: &Expr, name: &Token) -> CResult {
+    fn visit_get_expr(&mut self, object: &Expr, name: &Token) -> CResult {
+        object.accept(self)?;
         self.line = name.line;
-        Err(self.error("Classes and inheritance are not supported in VM backend."))
+        let k = self.identifier_constant(&name.lexeme)?;
+        self.emit(OpCode::GetProperty(k));
+        Ok(())
     }
 
-    fn visit_set_expr(&mut self, _object: &Expr, name: &Token, _value: &Expr) -> CResult {
+    fn visit_set_expr(&mut self, object: &Expr, name: &Token, value: &Expr) -> CResult {
+        // 1. Evaluar el objeto receptor
+        object.accept(self)?;
+
+        // 2. Verificar que sea instancia antes de evaluar el valor asignado
         self.line = name.line;
-        Err(self.error("Classes and inheritance are not supported in VM backend."))
+        self.emit(OpCode::CheckInstance);
+
+        // 3. Evaluar el valor a asignar (solo se alcanza si era instancia)
+        value.accept(self)?;
+
+        // 4. Asignar el campo y dejar el valor en el stack
+        self.line = name.line;
+        let k = self.identifier_constant(&name.lexeme)?;
+        self.emit(OpCode::SetProperty(k));
+        Ok(())
     }
 
     fn visit_this_expr(&mut self, _expr: &Expr, keyword: &Token) -> CResult {
@@ -523,10 +539,26 @@ impl StmtVisitor<CResult> for Compiler {
     fn visit_class_stmt(
         &mut self,
         name: &Token,
-        _superclass: &Option<Expr>,
-        _methods: &[Stmt],
+        superclass: &Option<Expr>,
+        methods: &[Stmt],
     ) -> CResult {
         self.line = name.line;
-        Err(self.error("Classes and inheritance are not supported in VM backend."))
+        if superclass.is_some() || !methods.is_empty() {
+            return Err(self.error("Methods and inheritance are not supported yet in VM backend."));
+        }
+
+        let is_local = self.state().scope_depth > 0;
+        if is_local {
+            self.add_local(name)?;
+        }
+
+        let name_constant = self.identifier_constant(&name.lexeme)?;
+        self.emit(OpCode::Class(name_constant));
+
+        if !is_local {
+            let global = self.identifier_constant(&name.lexeme)?;
+            self.emit(OpCode::DefineGlobal(global));
+        }
+        Ok(())
     }
 }

@@ -46,6 +46,12 @@ pub enum OpCode {
     GetUpvalue(u16),
     SetUpvalue(u16),
     CloseUpvalue,
+
+    // Clases e instancias
+    Class(u16),
+    GetProperty(u16),
+    SetProperty(u16),
+    CheckInstance,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -128,7 +134,10 @@ impl Chunk {
             OpCode::Constant(i)
             | OpCode::GetGlobal(i)
             | OpCode::DefineGlobal(i)
-            | OpCode::SetGlobal(i) => {
+            | OpCode::SetGlobal(i)
+            | OpCode::Class(i)
+            | OpCode::GetProperty(i)
+            | OpCode::SetProperty(i) => {
                 format!(
                     "{:<14} {:4} '{}'",
                     name_of(&op),
@@ -207,6 +216,10 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::GetUpvalue(_) => "OP_GET_UPVALUE",
         OpCode::SetUpvalue(_) => "OP_SET_UPVALUE",
         OpCode::CloseUpvalue => "OP_CLOSE_UPVALUE",
+        OpCode::Class(_) => "OP_CLASS",
+        OpCode::GetProperty(_) => "OP_GET_PROPERTY",
+        OpCode::SetProperty(_) => "OP_SET_PROPERTY",
+        OpCode::CheckInstance => "OP_CHECK_INSTANCE",
     }
 }
 

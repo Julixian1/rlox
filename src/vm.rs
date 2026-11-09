@@ -1,6 +1,8 @@
 use crate::chunk::{Chunk, OpCode};
 use crate::closure::{CallFrame, Closure, FnProto, Upvalue, UpvalueRef};
 use crate::value::Value;
+use crate::vm_class::{VmClass, VmInstance};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::rc::Rc;
@@ -129,6 +131,15 @@ impl<W: Write> Vm<W> {
     fn call_value(&mut self, callee: Value, argc: usize) -> Result<(), String> {
         match callee {
             Value::Closure(closure) => self.call_closure(closure, argc),
+            Value::VmClass(klass) => {
+                if argc != 0 {
+                    return Err(format!("Expected 0 arguments but got {}.", argc));
+                }
+                let instance = Rc::new(RefCell::new(VmInstance::new(klass)));
+                let slot = self.stack.len() - 1 - argc;
+                self.stack[slot] = Value::VmInstance(instance);
+                Ok(())
+            }
             _ => Err("Can only call functions and classes.".to_string()),
         }
     }
@@ -305,6 +316,49 @@ impl<W: Write> Vm<W> {
                 OpCode::CloseUpvalue => {
                     self.close_upvalues(self.stack.len() - 1);
                     self.pop();
+                }
+                OpCode::Class(k) => {
+                    let name = Self::name_at(chunk, k);
+                    let klass = VmClass::new(name.to_string());
+                    self.stack
+                        .push(Value::VmClass(Rc::new(RefCell::new(klass))));
+                }
+                OpCode::CheckInstance => match self.peek() {
+                    Value::VmInstance(_) => {}
+                    _ => return Err(Self::error(chunk, ip, "Only instances have fields.")),
+                },
+                OpCode::GetProperty(k) => {
+                    let name = Self::name_at(chunk, k);
+                    let obj = self.pop();
+                    match obj {
+                        Value::VmInstance(instance) => {
+                            if let Some(val) = instance.borrow().fields.get(name) {
+                                self.stack.push(val.clone());
+                            } else {
+                                return Err(Self::error(
+                                    chunk,
+                                    ip,
+                                    &format!("Undefined property '{}'.", name),
+                                ));
+                            }
+                        }
+                        _ => return Err(Self::error(chunk, ip, "Only instances have properties.")),
+                    }
+                }
+                OpCode::SetProperty(k) => {
+                    let name = Self::name_at(chunk, k);
+                    let value = self.pop();
+                    let obj = self.pop();
+                    match obj {
+                        Value::VmInstance(instance) => {
+                            instance
+                                .borrow_mut()
+                                .fields
+                                .insert(name.to_string(), value.clone());
+                            self.stack.push(value);
+                        }
+                        _ => return Err(Self::error(chunk, ip, "Only instances have fields.")),
+                    }
                 }
                 OpCode::Return => {
                     let result = self.pop();
