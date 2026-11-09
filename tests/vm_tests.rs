@@ -439,3 +439,54 @@ fn test_vm_runtime_error_call_wrong_arity() {
             .contains("Expected 2 arguments but got 1.")
     );
 }
+
+// ---------------------------------------------------------------------------
+// Tipos de runtime de la VM (Etapa 2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_vm_runtime_types_display_and_equality() {
+    use rlox::closure::{Closure, FnProto};
+    use rlox::value::Value;
+    use rlox::vm_class::{BoundMethod, VmClass, VmInstance};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    let class_rc1 = Rc::new(RefCell::new(VmClass::new("Bagel".to_string())));
+    let class_rc2 = Rc::new(RefCell::new(VmClass::new("Bagel".to_string())));
+
+    let val_class1 = Value::VmClass(Rc::clone(&class_rc1));
+    let val_class1_copy = Value::VmClass(Rc::clone(&class_rc1));
+    let val_class2 = Value::VmClass(Rc::clone(&class_rc2));
+
+    assert_eq!(format!("{}", val_class1), "<class Bagel>");
+    assert_eq!(val_class1, val_class1_copy);
+    assert_ne!(val_class1, val_class2);
+    assert!(val_class1.is_truthy());
+
+    let inst_rc1 = Rc::new(RefCell::new(VmInstance::new(Rc::clone(&class_rc1))));
+    let inst_rc2 = Rc::new(RefCell::new(VmInstance::new(Rc::clone(&class_rc1))));
+
+    let val_inst1 = Value::VmInstance(Rc::clone(&inst_rc1));
+    let val_inst1_copy = Value::VmInstance(Rc::clone(&inst_rc1));
+    let val_inst2 = Value::VmInstance(Rc::clone(&inst_rc2));
+
+    assert_eq!(format!("{}", val_inst1), "<instance of Bagel>");
+    assert_eq!(val_inst1, val_inst1_copy);
+    assert_ne!(val_inst1, val_inst2);
+    assert!(val_inst1.is_truthy());
+
+    let proto = Rc::new(FnProto::new(Some("eat".to_string())));
+    let closure = Rc::new(Closure::new(proto));
+    let bound1 = Rc::new(BoundMethod::new(val_inst1.clone(), Rc::clone(&closure)));
+    let bound2 = Rc::new(BoundMethod::new(val_inst1.clone(), Rc::clone(&closure)));
+
+    let val_bound1 = Value::BoundMethod(Rc::clone(&bound1));
+    let val_bound1_copy = Value::BoundMethod(Rc::clone(&bound1));
+    let val_bound2 = Value::BoundMethod(Rc::clone(&bound2));
+
+    assert_eq!(format!("{}", val_bound1), "<fn eat>");
+    assert_eq!(val_bound1, val_bound1_copy);
+    assert_ne!(val_bound1, val_bound2);
+    assert!(val_bound1.is_truthy());
+}

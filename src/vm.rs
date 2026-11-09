@@ -126,8 +126,6 @@ impl<W: Write> Vm<W> {
         }
     }
 
-    /// Despacha una llamada según el tipo del callee. Los errores se devuelven
-    /// sin línea: `run()` les agrega la posición de la instrucción `Call`.
     fn call_value(&mut self, callee: Value, argc: usize) -> Result<(), String> {
         match callee {
             Value::Closure(closure) => self.call_closure(closure, argc),
@@ -135,8 +133,6 @@ impl<W: Write> Vm<W> {
         }
     }
 
-    /// Valida aridad y profundidad, y empuja el frame de la closure.
-    /// El callee queda en el slot 0 del frame nuevo.
     fn call_closure(&mut self, closure: Rc<Closure>, argc: usize) -> Result<(), String> {
         if closure.arity() != argc {
             return Err(format!(
@@ -282,8 +278,6 @@ impl<W: Write> Vm<W> {
                     self.frames.last_mut().expect("no hay frame").ip = ip;
                     self.call_value(callee, argc)
                         .map_err(|msg| Self::error(chunk, ip, &msg))?;
-                    // `call_value` puede haber empujado un frame nuevo: se recarga
-                    // el estado cacheado desde el frame que quedó en el tope.
                     let frame = self.frames.last().expect("no hay frame");
                     closure = Rc::clone(&frame.closure);
                     ip = frame.ip;

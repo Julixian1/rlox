@@ -25,6 +25,8 @@ pub mod value;
 
 pub mod vm;
 
+pub mod vm_class;
+
 pub mod compiler;
 
 pub mod chunk;

@@ -2,6 +2,7 @@ use crate::class::{LoxClass, LoxInstance};
 use crate::closure::{Closure, FnProto};
 use crate::expr::LiteralValue;
 use crate::function::LoxFunction;
+use crate::vm_class::{BoundMethod, VmClass, VmInstance};
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -17,6 +18,9 @@ pub enum Value {
     Instance(Rc<RefCell<LoxInstance>>),
     Proto(Rc<FnProto>),
     Closure(Rc<Closure>),
+    VmClass(Rc<RefCell<VmClass>>),
+    VmInstance(Rc<RefCell<VmInstance>>),
+    BoundMethod(Rc<BoundMethod>),
 }
 
 impl PartialEq for Value {
@@ -31,6 +35,9 @@ impl PartialEq for Value {
             (Value::Instance(a), Value::Instance(b)) => Rc::ptr_eq(a, b),
             (Value::Proto(a), Value::Proto(b)) => Rc::ptr_eq(a, b),
             (Value::Closure(a), Value::Closure(b)) => Rc::ptr_eq(a, b),
+            (Value::VmClass(a), Value::VmClass(b)) => Rc::ptr_eq(a, b),
+            (Value::VmInstance(a), Value::VmInstance(b)) => Rc::ptr_eq(a, b),
+            (Value::BoundMethod(a), Value::BoundMethod(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -62,6 +69,9 @@ impl fmt::Display for Value {
             Value::Instance(instance) => write!(f, "{}", instance.borrow()),
             Value::Proto(proto) => write!(f, "{}", proto),
             Value::Closure(closure) => write!(f, "{}", closure),
+            Value::VmClass(klass) => write!(f, "{}", klass.borrow()),
+            Value::VmInstance(instance) => write!(f, "{}", instance.borrow()),
+            Value::BoundMethod(bound) => write!(f, "{}", bound),
         }
     }
 }
