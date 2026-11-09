@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
+use crate::class::{LoxClass, LoxInstance};
 use crate::environment::Environment;
 use crate::expr::{Expr, ExprVisitor, LiteralValue};
 use crate::function::{LoxFunction, ReturnSignal};
@@ -211,6 +212,7 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
             params.to_vec(),
             body.clone(),
             self.environment.clone(),
+            false,
         );
         self.environment
             .borrow_mut()

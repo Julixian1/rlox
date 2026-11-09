@@ -1,18 +1,39 @@
+use crate::class::{LoxClass, LoxInstance};
 use crate::closure::{Closure, FnProto};
 use crate::expr::LiteralValue;
 use crate::function::LoxFunction;
+use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
- 
-#[derive(Debug, Clone, PartialEq)]
+
+#[derive(Debug, Clone)]
 pub enum Value {
     Number(f64),
     String(String),
     Boolean(bool),
     Nil,
     Function(LoxFunction),
+    Class(Rc<RefCell<LoxClass>>),
+    Instance(Rc<RefCell<LoxInstance>>),
     Proto(Rc<FnProto>),
     Closure(Rc<Closure>),
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Number(a), Value::Number(b)) => a == b,
+            (Value::String(a), Value::String(b)) => a == b,
+            (Value::Boolean(a), Value::Boolean(b)) => a == b,
+            (Value::Nil, Value::Nil) => true,
+            (Value::Function(a), Value::Function(b)) => a == b,
+            (Value::Class(a), Value::Class(b)) => Rc::ptr_eq(a, b),
+            (Value::Instance(a), Value::Instance(b)) => Rc::ptr_eq(a, b),
+            (Value::Proto(a), Value::Proto(b)) => Rc::ptr_eq(a, b),
+            (Value::Closure(a), Value::Closure(b)) => Rc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
 }
  
 impl Value {
@@ -37,6 +58,8 @@ impl fmt::Display for Value {
             Value::Boolean(b) => write!(f, "{}", b),
             Value::Nil => write!(f, "nil"),
             Value::Function(func) => write!(f, "<fn {}>", func.name()),
+            Value::Class(klass) => write!(f, "{}", klass.borrow()),
+            Value::Instance(instance) => write!(f, "{}", instance.borrow()),
             Value::Proto(proto) => write!(f, "{}", proto),
             Value::Closure(closure) => write!(f, "{}", closure),
         }

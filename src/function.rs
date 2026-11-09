@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
+use crate::class::LoxInstance;
 use crate::environment::Environment;
 use crate::interpreter::Interpreter;
 use crate::stmt::Stmt;
@@ -29,6 +30,7 @@ pub struct LoxFunction {
     pub params: Vec<Token>,
     pub body: Rc<Vec<Stmt>>,
     pub closure: Rc<RefCell<Environment>>,
+    pub is_initializer: bool,
 }
 
 impl LoxFunction {
@@ -38,12 +40,14 @@ impl LoxFunction {
         params: Vec<Token>,
         body: Rc<Vec<Stmt>>,
         closure: Rc<RefCell<Environment>>,
+        is_initializer: bool,
     ) -> Self {
         LoxFunction {
             name,
             params,
             body,
             closure,
+            is_initializer,
         }
     }
 
@@ -55,6 +59,23 @@ impl LoxFunction {
     /// Retorna la aridad de la función (cantidad de parámetros que espera recibir).
     pub fn arity(&self) -> usize {
         self.params.len()
+    }
+
+    /// Enlaza la función a una instancia específica, creando un entorno léxico que contiene 'this'.
+    pub fn bind(&self, instance: Rc<RefCell<LoxInstance>>) -> LoxFunction {
+        let environment = Rc::new(RefCell::new(Environment::new_enclosed(
+            self.closure.clone(),
+        )));
+        environment
+            .borrow_mut()
+            .define("this".to_string(), Value::Instance(instance));
+        LoxFunction {
+            name: self.name.clone(),
+            params: self.params.clone(),
+            body: self.body.clone(),
+            closure: environment,
+            is_initializer: self.is_initializer,
+        }
     }
 
     /// Invoca la función pasando los argumentos correspondientes y ejecutando el cuerpo dentro de un nuevo entorno cerrado (closure).
@@ -74,9 +95,33 @@ impl LoxFunction {
         let result = interpreter.execute_block(&self.body, environment);
 
         match result {
-            Err(ReturnSignal::Return(value)) => Ok(value),
+            // 1. Un error en tiempo de ejecución SIEMPRE se propaga de inmediato como Err.
+            // NUNCA debe convertirse en retorno de 'this'.
             Err(ReturnSignal::Error(err)) => Err(ReturnSignal::Error(err)),
-            Ok(_) => Ok(Value::Nil),
+
+            // 2. Un retorno explícito en un inicializador devuelve 'this'.
+            Err(ReturnSignal::Return(value)) => {
+                if self.is_initializer {
+                    self.closure
+                        .borrow()
+                        .get_at(0, "this")
+                        .map_err(ReturnSignal::Error)
+                } else {
+                    Ok(value)
+                }
+            }
+
+            // 3. Finalización normal del bloque de código.
+            Ok(_) => {
+                if self.is_initializer {
+                    self.closure
+                        .borrow()
+                        .get_at(0, "this")
+                        .map_err(ReturnSignal::Error)
+                } else {
+                    Ok(Value::Nil)
+                }
+            }
         }
     }
 }

@@ -20,6 +20,8 @@ pub mod stmt;
 pub mod token;
 /// Definición de los valores en tiempo de ejecución de Lox.
 pub mod value;
+/// Representación de clases e instancias de Lox.
+pub mod class;
 
 pub mod vm;
 
