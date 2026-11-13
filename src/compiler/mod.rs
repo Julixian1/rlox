@@ -1,3 +1,11 @@
+pub mod chunk;
+pub mod class;
+pub mod closure;
+pub mod function;
+pub mod value;
+pub mod vm;
+pub mod vm_class;
+
 use crate::chunk::{Chunk, OpCode};
 use crate::closure::{FnProto, UpvalueDesc};
 use crate::expr::{Expr, ExprVisitor, LiteralValue};

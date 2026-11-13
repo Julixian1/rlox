@@ -1,3 +1,7 @@
+pub mod checker;
+pub mod environment;
+pub mod resolver;
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Write};
