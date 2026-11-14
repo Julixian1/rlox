@@ -78,7 +78,6 @@ pub struct Compiler {
     fns: Vec<FnState>,
     classes: Vec<ClassState>,
     line: usize,
-    #[allow(dead_code)]
     pub opt: OptConfig,
 }
 
@@ -304,6 +303,131 @@ impl Compiler {
         self.emit(OpCode::Closure(k));
         Ok(())
     }
+
+    // ---- optimizaciones: constant folding ------------------------------
+
+    fn emit_constant_val(&mut self, val: Value) -> CResult {
+        match val {
+            Value::Boolean(true) => {
+                self.emit(OpCode::True);
+            }
+            Value::Boolean(false) => {
+                self.emit(OpCode::False);
+            }
+            Value::Nil => {
+                self.emit(OpCode::Nil);
+            }
+            _ => {
+                let k = self.make_constant(val)?;
+                self.emit(OpCode::Constant(k));
+            }
+        }
+        Ok(())
+    }
+
+    fn try_eval_const(&self, expr: &Expr) -> Option<Value> {
+        match expr {
+            Expr::Literal { value } => match value {
+                LiteralValue::Number(n) => Some(Value::Number(*n)),
+                LiteralValue::Bool(b) => Some(Value::Boolean(*b)),
+                LiteralValue::Nil => Some(Value::Nil),
+                LiteralValue::StringVal(s) => Some(Value::String(s.clone())),
+            },
+            Expr::Grouping { expression } => self.try_eval_const(expression),
+            Expr::Unary { operator, right } => {
+                self.try_eval_unary(&operator.token_type, right)
+            }
+            Expr::Binary {
+                left,
+                operator,
+                right,
+            } => self.try_eval_binary(left, &operator.token_type, right),
+            _ => None,
+        }
+    }
+
+    fn try_eval_unary(&self, op: &TokenType, right: &Expr) -> Option<Value> {
+        let val = self.try_eval_const(right)?;
+        match op {
+            TokenType::Minus => match val {
+                Value::Number(n) => Some(Value::Number(-n)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    fn try_eval_binary(&self, left: &Expr, op: &TokenType, right: &Expr) -> Option<Value> {
+        let l_val = self.try_eval_const(left)?;
+        let r_val = self.try_eval_const(right)?;
+
+        match op {
+            TokenType::Plus => match (l_val, r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Number(a + b)),
+                _ => None,
+            },
+            TokenType::Minus => match (l_val, r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Number(a - b)),
+                _ => None,
+            },
+            TokenType::Star => match (l_val, r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Number(a * b)),
+                _ => None,
+            },
+            TokenType::Slash => match (l_val, r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Number(a / b)),
+                _ => None,
+            },
+            TokenType::Percent => match (l_val, r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Number(a % b)),
+                _ => None,
+            },
+            TokenType::Less => match (l_val, r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a < b)),
+                _ => None,
+            },
+            TokenType::LessEqual => match (l_val, r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a <= b)),
+                _ => None,
+            },
+            TokenType::Greater => match (l_val, r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a > b)),
+                _ => None,
+            },
+            TokenType::GreaterEqual => match (l_val, r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a >= b)),
+                _ => None,
+            },
+            TokenType::EqualEqual => match (&l_val, &r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a == b)),
+                (Value::String(a), Value::String(b)) => Some(Value::Boolean(a == b)),
+                (Value::Boolean(a), Value::Boolean(b)) => Some(Value::Boolean(a == b)),
+                (Value::Nil, Value::Nil) => Some(Value::Boolean(true)),
+                _ if is_safe_literal(&l_val) && is_safe_literal(&r_val) => {
+                    Some(Value::Boolean(false))
+                }
+                _ => None,
+            },
+            TokenType::BangEqual => match (&l_val, &r_val) {
+                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a != b)),
+                (Value::String(a), Value::String(b)) => Some(Value::Boolean(a != b)),
+                (Value::Boolean(a), Value::Boolean(b)) => Some(Value::Boolean(a != b)),
+                (Value::Nil, Value::Nil) => Some(Value::Boolean(false)),
+                _ if is_safe_literal(&l_val) && is_safe_literal(&r_val) => {
+                    Some(Value::Boolean(true))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+}
+
+fn is_safe_literal(val: &Value) -> bool {
+    matches!(
+        val,
+        Value::Number(_) | Value::String(_) | Value::Boolean(_) | Value::Nil
+    )
 }
 
 impl ExprVisitor<CResult> for Compiler {
@@ -331,6 +455,13 @@ impl ExprVisitor<CResult> for Compiler {
     }
 
     fn visit_unary_expr(&mut self, operator: &Token, right: &Expr) -> CResult {
+        if self.opt.constant_folding {
+            if let Some(val) = self.try_eval_unary(&operator.token_type, right) {
+                self.line = operator.line;
+                return self.emit_constant_val(val);
+            }
+        }
+
         right.accept(self)?;
         self.line = operator.line;
         match operator.token_type {
@@ -346,6 +477,13 @@ impl ExprVisitor<CResult> for Compiler {
     }
 
     fn visit_binary_expr(&mut self, left: &Expr, operator: &Token, right: &Expr) -> CResult {
+        if self.opt.constant_folding {
+            if let Some(val) = self.try_eval_binary(left, &operator.token_type, right) {
+                self.line = operator.line;
+                return self.emit_constant_val(val);
+            }
+        }
+
         left.accept(self)?;
         right.accept(self)?;
         self.line = operator.line;
