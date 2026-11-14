@@ -27,7 +27,7 @@ impl<W: Write> Vm<W> {
     pub fn with_output(out: W) -> Self {
         Vm {
             stack: Vec::with_capacity(256),
-            frames: Vec::new(),
+            frames: Vec::with_capacity(64),
             globals: HashMap::new(),
             open_upvalues: Vec::new(),
             out,
@@ -141,31 +141,7 @@ impl<W: Write> Vm<W> {
         }
     }
 
-    fn call_value(&mut self, callee: Value, argc: usize) -> Result<(), String> {
-        match callee {
-            Value::Closure(closure) => self.call_closure(closure, argc),
-            Value::BoundMethod(bound) => {
-                let slot = self.stack.len() - 1 - argc;
-                self.stack[slot] = bound.receiver.clone();
-                self.call_closure(Rc::clone(&bound.method), argc)
-            }
-            Value::VmClass(klass) => {
-                let instance = Rc::new(RefCell::new(VmInstance::new(klass.clone())));
-                let slot = self.stack.len() - 1 - argc;
-                self.stack[slot] = Value::VmInstance(instance);
-
-                if let Some(init) = klass.borrow().methods.get("init").cloned() {
-                    self.call_closure(init, argc)
-                } else if argc != 0 {
-                    Err(format!("Expected 0 arguments but got {}.", argc))
-                } else {
-                    Ok(())
-                }
-            }
-            _ => Err("Can only call functions and classes.".to_string()),
-        }
-    }
-
+    #[inline(always)]
     fn call_closure(&mut self, closure: Rc<Closure>, argc: usize) -> Result<(), String> {
         if closure.arity() != argc {
             return Err(format!(
@@ -317,15 +293,57 @@ impl<W: Write> Vm<W> {
 
                 OpCode::Call(argc) => {
                     let argc = argc as usize;
-                    // El callee está debajo de sus argumentos.
-                    let callee = self.stack[self.stack.len() - 1 - argc].clone();
+                    let callee_slot = self.stack.len() - 1 - argc;
                     self.frames.last_mut().expect("no hay frame").ip = ip;
-                    self.call_value(callee, argc)
-                        .map_err(|msg| Self::error(chunk, ip, &msg))?;
-                    let frame = self.frames.last().expect("no hay frame");
-                    closure = Rc::clone(&frame.closure);
-                    ip = frame.ip;
-                    base = frame.base;
+
+                    match &self.stack[callee_slot] {
+                        Value::Closure(c) => {
+                            let c = Rc::clone(c);
+                            self.call_closure(Rc::clone(&c), argc)
+                                .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            closure = c;
+                            ip = 0;
+                            base = callee_slot;
+                        }
+                        Value::BoundMethod(bound) => {
+                            let receiver = bound.receiver.clone();
+                            let method = Rc::clone(&bound.method);
+                            self.stack[callee_slot] = receiver;
+                            self.call_closure(Rc::clone(&method), argc)
+                                .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            closure = method;
+                            ip = 0;
+                            base = callee_slot;
+                        }
+                        Value::VmClass(klass) => {
+                            let klass = Rc::clone(klass);
+                            let instance =
+                                Rc::new(RefCell::new(VmInstance::new(Rc::clone(&klass))));
+                            self.stack[callee_slot] = Value::VmInstance(instance);
+
+                            let init = klass.borrow().methods.get("init").cloned();
+                            if let Some(init) = init {
+                                self.call_closure(Rc::clone(&init), argc)
+                                    .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                                closure = init;
+                                ip = 0;
+                                base = callee_slot;
+                            } else if argc != 0 {
+                                return Err(Self::error(
+                                    chunk,
+                                    ip,
+                                    &format!("Expected 0 arguments but got {}.", argc),
+                                ));
+                            }
+                        }
+                        _ => {
+                            return Err(Self::error(
+                                chunk,
+                                ip,
+                                "Can only call functions and classes.",
+                            ));
+                        }
+                    }
                 }
                 OpCode::Closure(k) => {
                     let proto = match &chunk.constants[k as usize] {
