@@ -10,6 +10,7 @@ pub struct UpvalueDesc {
     pub index: u16,
 }
 
+#[derive(Clone)]
 pub struct FnProto {
     pub name: Option<String>,
     pub arity: usize,

@@ -1,0 +1,29 @@
+fun compute(x) {
+  if (false) {
+    print "nunca";
+    return x * 100;
+  } else {
+    return x + 1;
+    print "inalcanzable";
+  }
+}
+
+fun main() {
+  while (false) {
+    print "bucle muerto";
+  }
+
+  var i = 0;
+  var sum = 0;
+  while (i < 2000000) {
+    if (true) {
+      sum = sum + compute(i);
+    } else {
+      sum = sum - 1;
+    }
+    i = i + 1;
+  }
+  print sum;
+}
+main();
+

@@ -20,6 +20,7 @@ pub use opt::{OptConfig, OptLevel, OptPass};
 
 type CResult = Result<(), String>;
 
+#[derive(Clone)]
 struct Local {
     name: String,
     depth: usize,
@@ -34,6 +35,7 @@ enum FnKind {
     Initializer,
 }
 
+#[derive(Clone)]
 struct FnState {
     proto: FnProto,
     locals: Vec<Local>,
@@ -70,10 +72,12 @@ enum Var {
     Global,
 }
 
+#[derive(Clone)]
 struct ClassState {
     has_superclass: bool,
 }
 
+#[derive(Clone)]
 pub struct Compiler {
     fns: Vec<FnState>,
     classes: Vec<ClassState>,
@@ -104,9 +108,7 @@ impl Compiler {
     }
 
     pub fn compile(mut self, statements: &[Stmt]) -> Result<Rc<FnProto>, String> {
-        for stmt in statements {
-            stmt.accept(&mut self)?;
-        }
+        self.compile_stmt_sequence(statements)?;
         self.emit(OpCode::Nil);
         self.emit(OpCode::Return);
         let script = self.fns.pop().expect("falta el estado del script");
@@ -285,9 +287,7 @@ impl Compiler {
         }
         self.fns.push(state);
 
-        for stmt in body {
-            stmt.accept(self)?;
-        }
+        self.compile_stmt_sequence(body)?;
 
         if kind == FnKind::Initializer {
             self.emit(OpCode::GetLocal(0));
@@ -420,6 +420,56 @@ impl Compiler {
             },
             _ => None,
         }
+    }
+
+    // ---- optimizaciones: dead code elimination -------------------------
+
+    fn try_eval_condition(&self, expr: &Expr) -> Option<Value> {
+        if self.opt.constant_folding {
+            self.try_eval_const(expr)
+        } else {
+            match expr {
+                Expr::Literal { value } => match value {
+                    LiteralValue::Bool(b) => Some(Value::Boolean(*b)),
+                    LiteralValue::Nil => Some(Value::Nil),
+                    LiteralValue::Number(n) => Some(Value::Number(*n)),
+                    LiteralValue::StringVal(s) => Some(Value::String(s.clone())),
+                },
+                Expr::Grouping { expression } => self.try_eval_condition(expression),
+                _ => None,
+            }
+        }
+    }
+
+    fn validate_dead_stmt(&self, stmt: &Stmt) -> CResult {
+        let mut validator = self.clone();
+        validator.opt.dead_code_elimination = false;
+        stmt.accept(&mut validator)
+    }
+
+    fn validate_dead_stmts(&self, stmts: &[Stmt]) -> CResult {
+        let mut validator = self.clone();
+        validator.opt.dead_code_elimination = false;
+        for stmt in stmts {
+            stmt.accept(&mut validator)?;
+        }
+        Ok(())
+    }
+
+    fn compile_stmt_sequence(&mut self, statements: &[Stmt]) -> CResult {
+        for (i, stmt) in statements.iter().enumerate() {
+            stmt.accept(self)?;
+            if matches!(stmt, Stmt::Return { .. }) {
+                if self.opt.dead_code_elimination {
+                    let dead_tail = &statements[i + 1..];
+                    if !dead_tail.is_empty() {
+                        self.validate_dead_stmts(dead_tail)?;
+                    }
+                    return Ok(());
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -684,9 +734,7 @@ impl StmtVisitor<CResult> for Compiler {
 
     fn visit_block_stmt(&mut self, statements: &[Stmt]) -> CResult {
         self.begin_scope();
-        for stmt in statements {
-            stmt.accept(self)?;
-        }
+        self.compile_stmt_sequence(statements)?;
         self.end_scope();
         Ok(())
     }
@@ -697,6 +745,24 @@ impl StmtVisitor<CResult> for Compiler {
         then_branch: &Stmt,
         else_branch: &Option<Box<Stmt>>,
     ) -> CResult {
+        if self.opt.dead_code_elimination {
+            if let Some(val) = self.try_eval_condition(condition) {
+                if val.is_truthy() {
+                    then_branch.accept(self)?;
+                    if let Some(else_stmt) = else_branch {
+                        self.validate_dead_stmt(else_stmt)?;
+                    }
+                    return Ok(());
+                } else {
+                    self.validate_dead_stmt(then_branch)?;
+                    if let Some(else_stmt) = else_branch {
+                        else_stmt.accept(self)?;
+                    }
+                    return Ok(());
+                }
+            }
+        }
+
         condition.accept(self)?;
         let then_jump = self.emit_jump(OpCode::JumpIfFalse(0));
         self.emit(OpCode::Pop);
@@ -711,6 +777,15 @@ impl StmtVisitor<CResult> for Compiler {
     }
 
     fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) -> CResult {
+        if self.opt.dead_code_elimination {
+            if let Some(val) = self.try_eval_condition(condition) {
+                if !val.is_truthy() {
+                    self.validate_dead_stmt(body)?;
+                    return Ok(());
+                }
+            }
+        }
+
         let loop_start = self.chunk().code.len();
         condition.accept(self)?;
         let exit_jump = self.emit_jump(OpCode::JumpIfFalse(0));

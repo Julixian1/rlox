@@ -465,3 +465,416 @@ fn test_e4a_compiler_validations_not_bypassed() {
         );
     }
 }
+
+#[test]
+fn test_e4b_dce_conditionals_bytecode_and_flags() {
+    let src = r#"
+        if (false) {
+            print "Nunca";
+        } else {
+            print "Siempre";
+        }
+    "#;
+
+    // 1. Con -O0: se emite la condición (False), JumpIfFalse, Pop, rama then, Jump, Pop, rama else
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let (out_o0, code_o0) = run_with_opt(src, o0);
+    assert_eq!(out_o0, "Siempre\n");
+    assert!(code_o0.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+    assert!(code_o0.iter().any(|op| matches!(op, OpCode::Jump(_))));
+
+    // 2. Con -O0 --opt=dce: funciona INDEPENDIENTEMENTE de Constant Folding
+    let mut o0_dce = OptConfig::from_level(OptLevel::O0);
+    o0_dce.apply_flags("dce", true).unwrap();
+    let (out_dce, code_dce) = run_with_opt(src, o0_dce);
+    assert_eq!(out_dce, "Siempre\n");
+    assert!(!code_dce.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+    assert!(!code_dce.iter().any(|op| matches!(op, OpCode::Jump(_))));
+    assert_eq!(
+        code_dce,
+        vec![
+            OpCode::Constant(0), // "Siempre"
+            OpCode::Print,
+            OpCode::Nil,
+            OpCode::Return,
+        ]
+    );
+
+    // 3. Con -O1 y -O2: DCE activo por defecto
+    let o1 = OptConfig::from_level(OptLevel::O1);
+    let (out_o1, code_o1) = run_with_opt(src, o1);
+    assert_eq!(out_o1, "Siempre\n");
+    assert_eq!(code_dce, code_o1);
+
+    // 4. Con -O1 --no-opt=dce: desactiva DCE (mantiene saltos)
+    let mut o1_no_dce = OptConfig::from_level(OptLevel::O1);
+    o1_no_dce.apply_flags("dce", false).unwrap();
+    let (out_no_dce, code_no_dce) = run_with_opt(src, o1_no_dce);
+    assert_eq!(out_no_dce, "Siempre\n");
+    assert!(code_no_dce.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+}
+
+#[test]
+fn test_e4b_dce_if_true_without_else() {
+    let src = "if (true) { print \"Si\"; }";
+
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let (out_o0, code_o0) = run_with_opt(src, o0);
+    assert_eq!(out_o0, "Si\n");
+    assert!(code_o0.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+
+    let o1 = OptConfig::from_level(OptLevel::O1);
+    let (out_o1, code_o1) = run_with_opt(src, o1);
+    assert_eq!(out_o1, "Si\n");
+    assert!(!code_o1.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+    assert_eq!(
+        code_o1,
+        vec![
+            OpCode::Constant(0), // "Si"
+            OpCode::Print,
+            OpCode::Nil,
+            OpCode::Return,
+        ]
+    );
+}
+
+#[test]
+fn test_e4b_dce_if_false_without_else() {
+    let src = "if (false) { print \"Nunca\"; }";
+
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let (out_o0, code_o0) = run_with_opt(src, o0);
+    assert_eq!(out_o0, "");
+    assert!(code_o0.len() > 2); // tiene jumps, pops, constante
+
+    let o1 = OptConfig::from_level(OptLevel::O1);
+    let (out_o1, code_o1) = run_with_opt(src, o1);
+    assert_eq!(out_o1, "");
+    // El cuerpo entero desaparece, solo queda el epílogo del script (Nil, Return)
+    assert_eq!(code_o1, vec![OpCode::Nil, OpCode::Return]);
+}
+
+#[test]
+fn test_e4b_dce_while_false() {
+    let src = "while (false) { print \"Nunca\"; }";
+
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let (out_o0, code_o0) = run_with_opt(src, o0);
+    assert_eq!(out_o0, "");
+    assert!(code_o0.iter().any(|op| matches!(op, OpCode::Loop(_))));
+
+    let o1 = OptConfig::from_level(OptLevel::O1);
+    let (out_o1, code_o1) = run_with_opt(src, o1);
+    assert_eq!(out_o1, "");
+    // Sin bucle, sin jumps, sin código del cuerpo
+    assert_eq!(code_o1, vec![OpCode::Nil, OpCode::Return]);
+}
+
+#[test]
+fn test_e4b_dce_unconditional_return() {
+    let src = r#"
+        fun f() {
+            return 10;
+            print "Inalcanzable";
+            print "Nunca";
+        }
+        print f();
+    "#;
+
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let (out_o0, _) = run_with_opt(src, o0.clone());
+    assert_eq!(out_o0, "10\n");
+
+    let o1 = OptConfig::from_level(OptLevel::O1);
+    let (out_o1, _) = run_with_opt(src, o1.clone());
+    assert_eq!(out_o1, "10\n");
+
+    let stmts = parse_and_check(src);
+    let proto_o0 = compiler::compile_with_opt(&stmts, o0).unwrap();
+    let proto_o1 = compiler::compile_with_opt(&stmts, o1).unwrap();
+
+    fn count_prints(proto: &rlox::closure::FnProto) -> usize {
+        let mut count = proto.chunk.code.iter().filter(|op| matches!(op, OpCode::Print)).count();
+        for c in &proto.chunk.constants {
+            if let rlox::value::Value::Proto(p) = c {
+                count += count_prints(p);
+            }
+        }
+        count
+    }
+    // En O0: print f() exterior + 2 prints inalcanzables = 3 prints
+    assert_eq!(count_prints(&proto_o0), 3);
+    // En O1: solo el print f() exterior = 1 print
+    assert_eq!(count_prints(&proto_o1), 1);
+}
+
+#[test]
+fn test_e4b_dce_preserves_compiler_validations_in_dead_branches() {
+    let invalid_programs = [
+        ("if (false) { print this; }", "Can't use 'this' outside of a class."),
+        ("if (true) { print 1; } else { print this; }", "Can't use 'this' outside of a class."),
+        ("while (false) { print super.foo(); }", "Can't use 'super' outside of a class."),
+        ("if (false) { return 42; }", "Can't return from top-level code."),
+        ("while (false) { return 42; }", "Can't return from top-level code."),
+        (
+            "class A { foo() { return 1; print super.bar(); } }",
+            "Can't use 'super' in a class with no superclass.",
+        ),
+    ];
+
+    for (src, expected_err) in invalid_programs {
+        let mut scanner = Scanner::new(src.to_string());
+        let tokens = scanner.scan_tokens().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse().unwrap();
+
+        let res_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0));
+        let res_o1 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O1));
+
+        assert!(res_o0.is_err(), "O0 debió rechazar: {}", src);
+        assert!(res_o1.is_err(), "O1 debió rechazar: {}", src);
+        let err0 = res_o0.unwrap_err();
+        let err1 = res_o1.unwrap_err();
+        assert_eq!(err0, err1);
+        assert!(err1.contains(expected_err));
+    }
+}
+
+#[test]
+fn test_e4b_dce_nested_and_combined_with_folding() {
+    let src = r#"
+        if (10 > 3) {
+            if (false) {
+                print "A";
+            } else {
+                print "B";
+            }
+        } else {
+            print "C";
+        }
+    "#;
+
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let (out_o0, _) = run_with_opt(src, o0);
+
+    let o1 = OptConfig::from_level(OptLevel::O1);
+    let (out_o1, code_o1) = run_with_opt(src, o1);
+
+    assert_eq!(out_o0, "B\n");
+    assert_eq!(out_o1, "B\n");
+    assert!(!code_o1.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_) | OpCode::Jump(_))));
+    assert_eq!(
+        code_o1,
+        vec![
+            OpCode::Constant(0), // "B"
+            OpCode::Print,
+            OpCode::Nil,
+            OpCode::Return,
+        ]
+    );
+}
+
+#[test]
+fn test_e4b_dce_no_elimination_of_reachable_code_or_side_effects() {
+    let src = r#"
+        fun f(x) {
+            if (x > 0) {
+                return 10;
+            }
+            return 20;
+        }
+        print f(5);
+        print f(-1);
+    "#;
+
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o1, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O1));
+
+    assert_eq!(out_o0, "10\n20\n");
+    assert_eq!(out_o1, "10\n20\n");
+}
+
+#[test]
+fn test_e4b_dce_duplicate_declarations_in_dead_code_rejected() {
+    let duplicate_cases = [
+        // Declaraciones duplicadas consecutivas tras return
+        (
+            r#"
+            fun ejemplo() {
+                return 10;
+                var a = 1;
+                var a = 2;
+            }
+            "#,
+            "Already a variable with this name in this scope.",
+        ),
+        // Declaraciones duplicadas dentro de if(false)
+        (
+            r#"
+            if (false) {
+                var x = 1;
+                var x = 2;
+            }
+            "#,
+            "Already a variable with this name in this scope.",
+        ),
+        // Declaraciones duplicadas dentro de while(false)
+        (
+            r#"
+            while (false) {
+                var y = 1;
+                var y = 2;
+            }
+            "#,
+            "Already a variable with this name in this scope.",
+        ),
+    ];
+
+    for (src, expected_err) in duplicate_cases {
+        let mut scanner = Scanner::new(src.to_string());
+        let tokens = scanner.scan_tokens().unwrap();
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse().unwrap();
+
+        // El checker rechaza el programa idénticamente tanto para O0 como O1
+        let errors = checker::check(&stmts);
+        assert!(!errors.is_empty(), "El checker debió detectar error en: {}", src);
+        assert!(errors[0].contains(expected_err));
+    }
+}
+
+#[test]
+fn test_e4b_dce_consecutive_accumulated_declarations_after_return() {
+    let src = r#"
+        fun ejemplo() {
+            return 42;
+            var a = 1;
+            var b = a + 2;
+            fun inner() {
+                return a + b;
+            }
+            print inner();
+        }
+        print ejemplo();
+    "#;
+
+    // Con O0 y O1 la salida debe ser idéntica: 42
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o1, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O1));
+    assert_eq!(out_o0, "42\n");
+    assert_eq!(out_o1, "42\n");
+}
+
+#[test]
+fn test_e4b_dce_closures_and_upvalues_soundness() {
+    let cases = [
+        // 1. Variable local capturada únicamente dentro de if (false)
+        (
+            r#"
+            fun outer() {
+                var x = 10;
+                if (false) {
+                    fun dead() { print x; }
+                }
+                return x;
+            }
+            print outer();
+            "#,
+            "10\n",
+        ),
+        // 2. Variable local capturada únicamente dentro de while (false)
+        (
+            r#"
+            fun outer() {
+                var x = 20;
+                while (false) {
+                    fun dead() { print x; }
+                }
+                return x;
+            }
+            print outer();
+            "#,
+            "20\n",
+        ),
+        // 3. Variable local capturada tanto por closure alcanzable como por inalcanzable
+        (
+            r#"
+            fun outer() {
+                var x = 30;
+                if (false) {
+                    fun dead() { print x; }
+                }
+                fun alive() { return x + 5; }
+                return alive();
+            }
+            print outer();
+            "#,
+            "35\n",
+        ),
+        // 4. Rama muerta contiene closures anidadas que capturan variables de scopes exteriores
+        (
+            r#"
+            fun outer() {
+                var a = 100;
+                var b = 200;
+                if (false) {
+                    fun level1() {
+                        fun level2() { return a + b; }
+                        return level2();
+                    }
+                }
+                return a + b;
+            }
+            print outer();
+            "#,
+            "300\n",
+        ),
+        // 5. Tras rama eliminada se ejecutan instrucciones que acceden a variables locales o crean closures
+        (
+            r#"
+            fun outer() {
+                var a = 10;
+                if (false) {
+                    var dead_local = 999;
+                    fun dead_fn() { print dead_local; }
+                }
+                var b = 20;
+                fun alive() { return a + b; }
+                return alive();
+            }
+            print outer();
+            "#,
+            "30\n",
+        ),
+    ];
+
+    for (src, expected_out) in cases {
+        let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+        let (out_o1, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O1));
+
+        assert_eq!(out_o0, expected_out);
+        assert_eq!(out_o1, expected_out);
+
+        // Además, verificar recursivamente en protos que en O0 existen los saltos y en O1 se eliminaron
+        let stmts = parse_and_check(src);
+        let p0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+        let p1 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O1)).unwrap();
+
+        fn has_jumps(proto: &rlox::closure::FnProto) -> bool {
+            if proto.chunk.code.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_) | OpCode::Loop(_))) {
+                return true;
+            }
+            for c in &proto.chunk.constants {
+                if let rlox::value::Value::Proto(p) = c {
+                    if has_jumps(p) {
+                        return true;
+                    }
+                }
+            }
+            false
+        }
+
+        assert!(has_jumps(&p0), "En O0 deben existir saltos de control para: {}", src);
+        assert!(!has_jumps(&p1), "En O1 no deben quedar saltos de control para: {}", src);
+    }
+}
