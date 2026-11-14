@@ -118,15 +118,22 @@ fn test_e1_levels_produce_identical_bytecode_and_output() {
         let (out_base, code_base) = run_with_opt(source, opt_levels[0].clone());
 
         for opt in &opt_levels[1..] {
-            let (out_opt, code_opt) = run_with_opt(source, opt.clone());
+            let (out_opt, _code_opt) = run_with_opt(source, opt.clone());
             assert_eq!(
                 out_base, out_opt,
                 "Divergencia de salida para programa con nivel {:?}:\n{}",
                 opt.level, source
             );
+
+            let mut opt_no_opts = opt.clone();
+            opt_no_opts.apply_flags("fold", false).unwrap();
+            opt_no_opts.apply_flags("dce", false).unwrap();
+            opt_no_opts.apply_flags("jumps", false).unwrap();
+            opt_no_opts.apply_flags("invoke", false).unwrap();
+            let (_, code_no_opts) = run_with_opt(source, opt_no_opts);
             assert_eq!(
-                code_base, code_opt,
-                "En E1 el bytecode debe ser estrictamente idéntico entre -O0 y {:?}:\n{}",
+                code_base, code_no_opts,
+                "Con optimizaciones desactivadas el bytecode debe ser estrictamente idéntico entre -O0 y {:?}:\n{}",
                 opt.level, source
             );
         }
@@ -1536,4 +1543,423 @@ fn test_audit_e4_8_aborted_compaction_leaves_chunk_intact() {
 
     assert_eq!(chunk.code, original_code);
     assert_eq!(chunk.lines, original_lines);
+}
+
+// ============================================================================
+// Pruebas E5.A.1: Invoke Optimization (PrepareInvoke + Invoke)
+// ============================================================================
+
+fn find_opcode<F>(proto: &rlox::closure::FnProto, predicate: &F) -> bool
+where
+    F: Fn(&OpCode) -> bool,
+{
+    if proto.chunk.code.iter().any(predicate) {
+        return true;
+    }
+    for c in &proto.chunk.constants {
+        if let rlox::value::Value::Proto(p) = c {
+            if find_opcode(p, predicate) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[test]
+fn test_e5a1_bytecode_emission_and_flags() {
+    let src = r#"
+        class Greeter {
+            say(msg) { print msg; }
+        }
+        var g = Greeter();
+        g.say("hola");
+    "#;
+    let stmts = parse_and_check(src);
+
+    // 1. Con -O0 (sin invoke): debe contener GetProperty y Call, NO PrepareInvoke ni Invoke
+    let opt_o0 = OptConfig::from_level(OptLevel::O0);
+    let proto_o0 = compiler::compile_with_opt(&stmts, opt_o0).unwrap();
+    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::GetProperty(_))));
+    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::Call(_))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::PrepareInvoke(_))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::Invoke(_))));
+
+    // 2. Con -O0 --opt=invoke: debe contener PrepareInvoke e Invoke
+    let mut opt_o0_invoke = OptConfig::from_level(OptLevel::O0);
+    opt_o0_invoke.apply_flags("invoke", true).unwrap();
+    let proto_o0_invoke = compiler::compile_with_opt(&stmts, opt_o0_invoke).unwrap();
+    assert!(find_opcode(&proto_o0_invoke, &|op| matches!(op, OpCode::PrepareInvoke(_))));
+    assert!(find_opcode(&proto_o0_invoke, &|op| matches!(op, OpCode::Invoke(_))));
+
+    // 3. Con -O2: invoke está activo por defecto
+    let opt_o2 = OptConfig::from_level(OptLevel::O2);
+    let proto_o2 = compiler::compile_with_opt(&stmts, opt_o2).unwrap();
+    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::PrepareInvoke(_))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::Invoke(_))));
+
+    // 4. Con -O2 --no-opt=invoke: invoke se desactiva
+    let mut opt_o2_no_invoke = OptConfig::from_level(OptLevel::O2);
+    opt_o2_no_invoke.apply_flags("invoke", false).unwrap();
+    let proto_o2_no_invoke = compiler::compile_with_opt(&stmts, opt_o2_no_invoke).unwrap();
+    assert!(!find_opcode(&proto_o2_no_invoke, &|op| matches!(op, OpCode::PrepareInvoke(_))));
+    assert!(!find_opcode(&proto_o2_no_invoke, &|op| matches!(op, OpCode::Invoke(_))));
+}
+
+#[test]
+fn test_e5a1_direct_method_calls_arguments_and_this() {
+    let src = r#"
+        class Calc {
+            init(base) {
+                this.base = base;
+            }
+            zero() {
+                return this.base;
+            }
+            one(x) {
+                return this.base + x;
+            }
+            multi(a, b, c) {
+                return this.base + a * b - c;
+            }
+            mutate(inc) {
+                this.base = this.base + inc;
+                return this.base;
+            }
+        }
+
+        var c = Calc(100);
+        print c.zero();
+        print c.one(5);
+        print c.multi(2, 3, 4);
+        print c.mutate(50);
+        print c.zero();
+    "#;
+
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_invoke = OptConfig::from_level(OptLevel::O0);
+    opt_invoke.apply_flags("invoke", true).unwrap();
+    let (out_invoke, _) = run_with_opt(src, opt_invoke);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    let expected = "100\n105\n102\n150\n150\n";
+    assert_eq!(out_o0, expected);
+    assert_eq!(out_invoke, expected);
+    assert_eq!(out_o2, expected);
+}
+
+#[test]
+fn test_e5a1_field_shadowing_and_mutation() {
+    // 1. Un campo que contiene una función
+    let src1 = r#"
+        class Host {
+            test() { return "metodo"; }
+        }
+        var h = Host();
+        fun campoFunc() { return "campo"; }
+        h.test = campoFunc;
+        print h.test();
+    "#;
+    let (out_o0, _) = run_with_opt(src1, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src1, opt_inv.clone());
+    assert_eq!(out_o0, "campo\n");
+    assert_eq!(out_inv, "campo\n");
+
+    // 2. Mutación del campo durante la evaluación del argumento
+    let src2 = r#"
+        class A {
+            init() {
+                fun f(x) { return x + 1; }
+                this.run = f;
+            }
+        }
+        var a = A();
+        fun side_effect() {
+            a.run = 999;
+            return 10;
+        }
+        print a.run(side_effect());
+    "#;
+    let (out2_o0, _) = run_with_opt(src2, OptConfig::from_level(OptLevel::O0));
+    let (out2_inv, _) = run_with_opt(src2, opt_inv);
+    assert_eq!(out2_o0, "11\n");
+    assert_eq!(out2_inv, "11\n");
+}
+
+#[test]
+fn test_e5a1_error_precedence_and_evaluation_order() {
+    // Caso A: receptor no es instancia con argumento que fallaría
+    let src1 = r#"
+        var obj = 123;
+        obj.method(variableInexistente);
+    "#;
+    let stmts1 = parse_and_check(src1);
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+
+    let proto1_o0 = compiler::compile_with_opt(&stmts1, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto1_inv = compiler::compile_with_opt(&stmts1, opt_inv.clone()).unwrap();
+
+    let mut vm_o0 = Vm::with_output(Vec::new());
+    let err_o0 = vm_o0.interpret(proto1_o0).unwrap_err();
+
+    let mut vm_inv = Vm::with_output(Vec::new());
+    let err_inv = vm_inv.interpret(proto1_inv).unwrap_err();
+
+    assert!(err_o0.contains("Only instances have properties."));
+    assert!(err_inv.contains("Only instances have properties."));
+
+    // Caso B: propiedad no existe con argumento con efecto secundario / división por cero
+    let src2 = r#"
+        class Foo {}
+        var f = Foo();
+        f.inexistente(1 / 0);
+    "#;
+    let stmts2 = parse_and_check(src2);
+    let proto2_o0 = compiler::compile_with_opt(&stmts2, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto2_inv = compiler::compile_with_opt(&stmts2, opt_inv).unwrap();
+
+    let mut vm2_o0 = Vm::with_output(Vec::new());
+    let err2_o0 = vm2_o0.interpret(proto2_o0).unwrap_err();
+
+    let mut vm2_inv = Vm::with_output(Vec::new());
+    let err2_inv = vm2_inv.interpret(proto2_inv).unwrap_err();
+
+    assert!(err2_o0.contains("Undefined property 'inexistente'."));
+    assert!(err2_inv.contains("Undefined property 'inexistente'."));
+}
+
+#[test]
+fn test_e5a1_nested_calls_and_order() {
+    let src = r#"
+        class Adder {
+            add(x, y) {
+                return x + y;
+            }
+            dup(x) {
+                return x * 2;
+            }
+        }
+        var a = Adder();
+        print a.add(a.dup(5), a.dup(10));
+        print a.dup(a.dup(a.dup(2)));
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src, opt_inv);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    let expected = "30\n16\n";
+    assert_eq!(out_o0, expected);
+    assert_eq!(out_inv, expected);
+    assert_eq!(out_o2, expected);
+}
+
+#[test]
+fn test_e5a1_recursive_methods_and_closures() {
+    let src = r#"
+        class Math {
+            fact(n) {
+                if (n <= 1) return 1;
+                return n * this.fact(n - 1);
+            }
+            makeAdder(x) {
+                fun adder(y) {
+                    return x + y;
+                }
+                return adder;
+            }
+        }
+        var m = Math();
+        print m.fact(5);
+        var add10 = m.makeAdder(10);
+        print add10(25);
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src, opt_inv);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    let expected = "120\n35\n";
+    assert_eq!(out_o0, expected);
+    assert_eq!(out_inv, expected);
+    assert_eq!(out_o2, expected);
+}
+
+#[test]
+fn test_e5a1_non_callable_field_error() {
+    let src = r#"
+        class Box {
+            init() {
+                this.val = 42;
+            }
+        }
+        var b = Box();
+        b.val();
+    "#;
+    let stmts = parse_and_check(src);
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+
+    let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_inv = compiler::compile_with_opt(&stmts, opt_inv).unwrap();
+
+    let mut vm_o0 = Vm::with_output(Vec::new());
+    let err_o0 = vm_o0.interpret(proto_o0).unwrap_err();
+
+    let mut vm_inv = Vm::with_output(Vec::new());
+    let err_inv = vm_inv.interpret(proto_inv).unwrap_err();
+
+    assert!(err_o0.contains("Can only call functions and classes."));
+    assert!(err_inv.contains("Can only call functions and classes."));
+}
+
+#[test]
+fn test_e5a1_inherited_method_resolution_three_levels() {
+    let src = r#"
+        class A {
+            foo() { return "A_foo"; }
+        }
+        class B < A {}
+        class C < B {}
+
+        var c = C();
+        print c.foo();
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, code_inv) = run_with_opt(src, opt_inv);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    assert_eq!(out_o0, "A_foo\n");
+    assert_eq!(out_inv, "A_foo\n");
+    assert_eq!(out_o2, "A_foo\n");
+
+    // Verificar que efectivamente se emitió PrepareInvoke e Invoke
+    assert!(code_inv.iter().any(|op| matches!(op, OpCode::PrepareInvoke(_))));
+    assert!(code_inv.iter().any(|op| matches!(op, OpCode::Invoke(_))));
+}
+
+#[test]
+fn test_e5a1_prepared_calls_integrity_nested_recursion() {
+    let src = r#"
+        class A {
+            method(x) { return x; }
+        }
+
+        fun nested(n) {
+            if (n <= 0) return 1;
+            var a = A();
+            return a.method(nested(n - 1));
+        }
+
+        var a = A();
+        print a.method(nested(10));
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src, opt_inv);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    assert_eq!(out_o0, "1\n");
+    assert_eq!(out_inv, "1\n");
+    assert_eq!(out_o2, "1\n");
+}
+
+#[test]
+fn test_e5a1_field_shadowing_various_callables() {
+    // 1. Campo que contiene una función normal
+    let src_func = r#"
+        class H {}
+        var h = H();
+        fun f(x) { return x * 2; }
+        h.m = f;
+        print h.m(21);
+    "#;
+    let (out_f_o0, _) = run_with_opt(src_func, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_f_inv, _) = run_with_opt(src_func, opt_inv.clone());
+    assert_eq!(out_f_o0, "42\n");
+    assert_eq!(out_f_inv, "42\n");
+
+    // 2. Campo que contiene una clase invocable
+    let src_class = r#"
+        class Target {
+            init(val) { this.val = val; }
+        }
+        class H {}
+        var h = H();
+        h.m = Target;
+        var t = h.m("creado");
+        print t.val;
+    "#;
+    let (out_c_o0, _) = run_with_opt(src_class, OptConfig::from_level(OptLevel::O0));
+    let (out_c_inv, _) = run_with_opt(src_class, opt_inv.clone());
+    assert_eq!(out_c_o0, "creado\n");
+    assert_eq!(out_c_inv, "creado\n");
+
+    // 3. Campo que contiene un BoundMethod previo
+    let src_bound = r#"
+        class Base {
+            say(greeting) { return greeting + " desde Base"; }
+        }
+        var b = Base();
+        var bound = b.say;
+        class H {}
+        var h = H();
+        h.m = bound;
+        print h.m("hola");
+    "#;
+    let (out_b_o0, _) = run_with_opt(src_bound, OptConfig::from_level(OptLevel::O0));
+    let (out_b_inv, _) = run_with_opt(src_bound, opt_inv.clone());
+    assert_eq!(out_b_o0, "hola desde Base\n");
+    assert_eq!(out_b_inv, "hola desde Base\n");
+
+    // 4. Campo que contiene un valor no invocable (error idéntico)
+    let src_err = r#"
+        class H {}
+        var h = H();
+        h.m = 12345;
+        h.m();
+    "#;
+    let stmts_err = parse_and_check(src_err);
+    let proto_err_o0 = compiler::compile_with_opt(&stmts_err, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_err_inv = compiler::compile_with_opt(&stmts_err, opt_inv.clone()).unwrap();
+
+    let mut vm_err_o0 = Vm::with_output(Vec::new());
+    let err_o0 = vm_err_o0.interpret(proto_err_o0).unwrap_err();
+
+    let mut vm_err_inv = Vm::with_output(Vec::new());
+    let err_inv = vm_err_inv.interpret(proto_err_inv).unwrap_err();
+
+    assert!(err_o0.contains("Can only call functions and classes."));
+    assert!(err_inv.contains("Can only call functions and classes."));
+
+    // 5. Error de aridad en función asignada a campo
+    let src_arity = r#"
+        class H {}
+        var h = H();
+        fun two_args(a, b) { return a + b; }
+        h.m = two_args;
+        h.m(1);
+    "#;
+    let stmts_arity = parse_and_check(src_arity);
+    let proto_ar_o0 = compiler::compile_with_opt(&stmts_arity, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_ar_inv = compiler::compile_with_opt(&stmts_arity, opt_inv).unwrap();
+
+    let mut vm_ar_o0 = Vm::with_output(Vec::new());
+    let err_ar_o0 = vm_ar_o0.interpret(proto_ar_o0).unwrap_err();
+
+    let mut vm_ar_inv = Vm::with_output(Vec::new());
+    let err_ar_inv = vm_ar_inv.interpret(proto_ar_inv).unwrap_err();
+
+    assert!(err_ar_o0.contains("Expected 2 arguments but got 1."));
+    assert!(err_ar_inv.contains("Expected 2 arguments but got 1."));
 }

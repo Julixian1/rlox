@@ -642,6 +642,24 @@ impl ExprVisitor<CResult> for Compiler {
     }
 
     fn visit_call_expr(&mut self, callee: &Expr, paren: &Token, arguments: &[Expr]) -> CResult {
+        if self.opt.inline_caches {
+            if let Expr::Get { object, name } = callee {
+                object.accept(self)?;
+                self.line = name.line;
+                let k = self.identifier_constant(&name.lexeme)?;
+                self.emit(OpCode::PrepareInvoke(k));
+                for arg in arguments {
+                    arg.accept(self)?;
+                }
+                self.line = paren.line;
+                if arguments.len() > u8::MAX as usize {
+                    return Err(self.error("Can't have more than 255 arguments."));
+                }
+                self.emit(OpCode::Invoke(arguments.len() as u8));
+                return Ok(());
+            }
+        }
+
         callee.accept(self)?;
         for arg in arguments {
             arg.accept(self)?;

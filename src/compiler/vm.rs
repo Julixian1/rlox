@@ -9,11 +9,25 @@ use std::rc::Rc;
 
 const FRAMES_MAX: usize = 100_000;
 
+#[derive(Debug, Clone)]
+enum PreparedCallable {
+    Method(Rc<Closure>),
+    Field(Value),
+}
+
+#[derive(Debug, Clone)]
+struct PreparedCall {
+    callable: PreparedCallable,
+    frame_depth: usize,
+    receiver_slot: usize,
+}
+
 pub struct Vm<W: Write> {
     stack: Vec<Value>,
     frames: Vec<CallFrame>,
     globals: HashMap<String, Value>,
     open_upvalues: Vec<UpvalueRef>,
+    prepared_calls: Vec<PreparedCall>,
     out: W,
 }
 
@@ -30,6 +44,7 @@ impl<W: Write> Vm<W> {
             frames: Vec::with_capacity(64),
             globals: HashMap::new(),
             open_upvalues: Vec::new(),
+            prepared_calls: Vec::with_capacity(16),
             out,
         }
     }
@@ -46,6 +61,11 @@ impl<W: Write> Vm<W> {
         let result = self.run();
         if result.is_err() {
             self.reset();
+        } else {
+            debug_assert!(
+                self.prepared_calls.is_empty(),
+                "prepared_calls no quedó vacía tras la ejecución exitosa"
+            );
         }
         result
     }
@@ -54,6 +74,7 @@ impl<W: Write> Vm<W> {
         self.stack.clear();
         self.frames.clear();
         self.open_upvalues.clear();
+        self.prepared_calls.clear();
     }
 
     fn pop(&mut self) -> Value {
@@ -342,6 +363,122 @@ impl<W: Write> Vm<W> {
                                 ip,
                                 "Can only call functions and classes.",
                             ));
+                        }
+                    }
+                }
+                OpCode::PrepareInvoke(k) => {
+                    let name = Self::name_at(chunk, k);
+                    let receiver = self.peek();
+                    match receiver {
+                        Value::VmInstance(instance) => {
+                            let callable = if let Some(val) = instance.borrow().fields.get(name) {
+                                PreparedCallable::Field(val.clone())
+                            } else {
+                                let method_opt = {
+                                    let class = Rc::clone(&instance.borrow().class);
+                                    class.borrow().methods.get(name).cloned()
+                                };
+                                if let Some(method) = method_opt {
+                                    PreparedCallable::Method(method)
+                                } else {
+                                    return Err(Self::error(
+                                        chunk,
+                                        ip,
+                                        &format!("Undefined property '{}'.", name),
+                                    ));
+                                }
+                            };
+                            let frame_depth = self.frames.len();
+                            let receiver_slot = self.stack.len() - 1;
+                            self.prepared_calls.push(PreparedCall {
+                                callable,
+                                frame_depth,
+                                receiver_slot,
+                            });
+                        }
+                        _ => return Err(Self::error(chunk, ip, "Only instances have properties.")),
+                    }
+                }
+                OpCode::Invoke(argc) => {
+                    let argc = argc as usize;
+                    let callee_slot = self.stack.len() - 1 - argc;
+                    let prep = self
+                        .prepared_calls
+                        .pop()
+                        .expect("OP_INVOKE sin OP_PREPARE_INVOKE previo");
+
+                    assert_eq!(
+                        prep.frame_depth,
+                        self.frames.len(),
+                        "desincronización de frame_depth en OP_INVOKE"
+                    );
+                    assert_eq!(
+                        prep.receiver_slot,
+                        callee_slot,
+                        "desincronización de receiver_slot en OP_INVOKE"
+                    );
+
+                    self.frames.last_mut().expect("no hay frame").ip = ip;
+
+                    match prep.callable {
+                        PreparedCallable::Method(method) => {
+                            self.call_closure(Rc::clone(&method), argc)
+                                .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            closure = method;
+                            ip = 0;
+                            base = callee_slot;
+                        }
+                        PreparedCallable::Field(field_val) => {
+                            self.stack[callee_slot] = field_val;
+
+                            match &self.stack[callee_slot] {
+                                Value::Closure(c) => {
+                                    let c = Rc::clone(c);
+                                    self.call_closure(Rc::clone(&c), argc)
+                                        .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                                    closure = c;
+                                    ip = 0;
+                                    base = callee_slot;
+                                }
+                                Value::BoundMethod(bound) => {
+                                    let receiver = bound.receiver.clone();
+                                    let method = Rc::clone(&bound.method);
+                                    self.stack[callee_slot] = receiver;
+                                    self.call_closure(Rc::clone(&method), argc)
+                                        .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                                    closure = method;
+                                    ip = 0;
+                                    base = callee_slot;
+                                }
+                                Value::VmClass(klass) => {
+                                    let klass = Rc::clone(klass);
+                                    let instance =
+                                        Rc::new(RefCell::new(VmInstance::new(Rc::clone(&klass))));
+                                    self.stack[callee_slot] = Value::VmInstance(instance);
+
+                                    let init = klass.borrow().methods.get("init").cloned();
+                                    if let Some(init) = init {
+                                        self.call_closure(Rc::clone(&init), argc)
+                                            .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                                        closure = init;
+                                        ip = 0;
+                                        base = callee_slot;
+                                    } else if argc != 0 {
+                                        return Err(Self::error(
+                                            chunk,
+                                            ip,
+                                            &format!("Expected 0 arguments but got {}.", argc),
+                                        ));
+                                    }
+                                }
+                                _ => {
+                                    return Err(Self::error(
+                                        chunk,
+                                        ip,
+                                        "Can only call functions and classes.",
+                                    ));
+                                }
+                            }
                         }
                     }
                 }
