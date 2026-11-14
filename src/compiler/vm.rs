@@ -246,6 +246,8 @@ impl<W: Write> Vm<W> {
                 }
                 OpCode::Greater => self.numeric(chunk, ip, |a, b| Value::Boolean(a > b))?,
                 OpCode::Less => self.numeric(chunk, ip, |a, b| Value::Boolean(a < b))?,
+                OpCode::GreaterEqual => self.numeric(chunk, ip, |a, b| Value::Boolean(a >= b))?,
+                OpCode::LessEqual => self.numeric(chunk, ip, |a, b| Value::Boolean(a <= b))?,
                 OpCode::Add => {
                     let b = self.pop();
                     let a = self.pop();

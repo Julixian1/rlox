@@ -73,6 +73,51 @@ fn test_vm_comparisons_and_equality() {
 }
 
 #[test]
+fn test_vm_nan_comparisons() {
+    let source = "
+    var nan = 0 / 0;
+    print nan <= 1;
+    print nan >= 1;
+    print 1 <= nan;
+    print 1 >= nan;
+    print nan < 1;
+    print nan > 1;
+    print 1 < nan;
+    print 1 > nan;
+    print nan <= nan;
+    print nan >= nan;
+    ";
+    let output = run_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(
+        output,
+        "false\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\n"
+    );
+}
+
+#[test]
+fn test_vm_runtime_error_type_mismatch_comparisons() {
+    for op in [">", "<", ">=", "<="] {
+        let source_left = format!("print \"abc\" {} 5;", op);
+        let err_left = run_vm(&source_left).unwrap_err();
+        assert!(
+            err_left.contains("Operands must be numbers."),
+            "Op {} falló al chequear operando izquierdo: {}",
+            op,
+            err_left
+        );
+
+        let source_right = format!("print 5 {} \"abc\";", op);
+        let err_right = run_vm(&source_right).unwrap_err();
+        assert!(
+            err_right.contains("Operands must be numbers."),
+            "Op {} falló al chequear operando derecho: {}",
+            op,
+            err_right
+        );
+    }
+}
+
+#[test]
 fn test_vm_string_concatenation() {
     let source = "
     var greeting = \"Hello, \" + \"world!\";
@@ -1128,4 +1173,82 @@ fn test_vm_runtime_error_undefined_super_property() {
             .unwrap_err()
             .contains("Undefined property 'nonExistent'.")
     );
+}
+
+// ---------------------------------------------------------------------------
+// Tests de VM basada en registros (RegVm)
+// ---------------------------------------------------------------------------
+
+fn run_reg_vm_output(source: &str) -> Result<String, String> {
+    let mut scanner = Scanner::new(source.to_string());
+    let tokens = scanner.scan_tokens()?;
+    let mut parser = Parser::new(tokens);
+    let statements = parser.parse()?;
+
+    let errors = checker::check(&statements);
+    if !errors.is_empty() {
+        return Err(errors.join("\n"));
+    }
+
+    let proto = rlox::compiler::reg::codegen::compile(&statements)?;
+    let mut output = Vec::new();
+    {
+        let mut vm = rlox::compiler::reg::vm::RegVm::with_output(&mut output);
+        vm.interpret(proto)?;
+    }
+    String::from_utf8(output)
+        .map(|s| s.replace("\r\n", "\n"))
+        .map_err(|e| e.to_string())
+}
+
+#[test]
+fn test_reg_vm_comparisons_and_nan() {
+    let source = "
+    print 5 > 3;
+    print 5 < 3;
+    print 5 >= 5;
+    print 5 <= 4;
+    print 5 <= 5;
+    print 4 >= 5;
+
+    var nan = 0 / 0;
+    print nan <= 1;
+    print nan >= 1;
+    print 1 <= nan;
+    print 1 >= nan;
+    print nan < 1;
+    print nan > 1;
+    print 1 < nan;
+    print 1 > nan;
+    print nan <= nan;
+    print nan >= nan;
+    ";
+    let output = run_reg_vm_output(source).expect("ejecución exitosa");
+    assert_eq!(
+        output,
+        "true\nfalse\ntrue\nfalse\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\nfalse\n"
+    );
+}
+
+#[test]
+fn test_reg_vm_comparison_type_errors() {
+    for op in [">", "<", ">=", "<="] {
+        let source_left = format!("print \"abc\" {} 5;", op);
+        let err_left = run_reg_vm_output(&source_left).unwrap_err();
+        assert!(
+            err_left.contains("Operands must be numbers."),
+            "Op {} falló al chequear operando izquierdo: {}",
+            op,
+            err_left
+        );
+
+        let source_right = format!("print 5 {} \"abc\";", op);
+        let err_right = run_reg_vm_output(&source_right).unwrap_err();
+        assert!(
+            err_right.contains("Operands must be numbers."),
+            "Op {} falló al chequear operando derecho: {}",
+            op,
+            err_right
+        );
+    }
 }

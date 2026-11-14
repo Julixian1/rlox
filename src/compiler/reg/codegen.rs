@@ -649,12 +649,10 @@ impl RegCompiler {
                 self.emit(RegOp::Not(d, d));
             }
             TokenType::GreaterEqual => {
-                self.emit(RegOp::Lt(d, l, r));
-                self.emit(RegOp::Not(d, d));
+                self.emit(RegOp::Le(d, r, l));
             }
             TokenType::LessEqual => {
-                self.emit(RegOp::Lt(d, r, l));
-                self.emit(RegOp::Not(d, d));
+                self.emit(RegOp::Le(d, l, r));
             }
             _ => {
                 return Err(self.error(&format!(

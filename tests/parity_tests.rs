@@ -1033,3 +1033,49 @@ fn test_parity_semantic_error_return_value_from_init() {
     ";
     assert_parity_err(source, "Can't return a value from an initializer.");
 }
+
+#[test]
+fn test_parity_nan_comparisons() {
+    let source = "
+    var n = 0 / 0;
+    print n <= 1;
+    print n >= 1;
+    print 1 <= n;
+    print 1 >= n;
+    print n < 1;
+    print n > 1;
+    print 1 < n;
+    print 1 > n;
+    print n <= n;
+    print n >= n;
+    ";
+    assert_parity_ok(source);
+}
+
+#[test]
+fn test_parity_normal_comparisons() {
+    let source = "
+    print 1 < 2;
+    print 2 < 1;
+    print 2 <= 2;
+    print 2 <= 1;
+    print 3 > 2;
+    print 2 > 3;
+    print 3 >= 3;
+    print 2 >= 3;
+    print -0 <= 0;
+    print 0 >= -0;
+    ";
+    assert_parity_ok(source);
+}
+
+#[test]
+fn test_parity_comparison_type_error() {
+    for op in [">", "<", ">=", "<="] {
+        let source_left = format!("print \"x\" {} 10;", op);
+        assert_parity_err(&source_left, "Operands must be numbers.");
+
+        let source_right = format!("print 10 {} \"x\";", op);
+        assert_parity_err(&source_right, "Operands must be numbers.");
+    }
+}

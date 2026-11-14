@@ -365,12 +365,10 @@ impl ExprVisitor<CResult> for Compiler {
                 self.emit(OpCode::Not);
             }
             TokenType::GreaterEqual => {
-                self.emit(OpCode::Less);
-                self.emit(OpCode::Not);
+                self.emit(OpCode::GreaterEqual);
             }
             TokenType::LessEqual => {
-                self.emit(OpCode::Greater);
-                self.emit(OpCode::Not);
+                self.emit(OpCode::LessEqual);
             }
             _ => {
                 return Err(self.error(&format!(
