@@ -18,6 +18,8 @@ pub enum OpCode {
     GetGlobal(u16),
     DefineGlobal(u16),
     SetGlobal(u16),
+    GetGlobalFast(u16),
+    SetGlobalFast(u16),
 
     // Comparación y aritmética
     Equal,
@@ -145,6 +147,8 @@ impl Chunk {
             | OpCode::GetGlobal(i)
             | OpCode::DefineGlobal(i)
             | OpCode::SetGlobal(i)
+            | OpCode::GetGlobalFast(i)
+            | OpCode::SetGlobalFast(i)
             | OpCode::Class(i)
             | OpCode::Method(i)
             | OpCode::GetProperty(i)
@@ -210,6 +214,8 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::GetGlobal(_) => "OP_GET_GLOBAL",
         OpCode::DefineGlobal(_) => "OP_DEFINE_GLOBAL",
         OpCode::SetGlobal(_) => "OP_SET_GLOBAL",
+        OpCode::GetGlobalFast(_) => "OP_GET_GLOBAL_FAST",
+        OpCode::SetGlobalFast(_) => "OP_SET_GLOBAL_FAST",
         OpCode::Equal => "OP_EQUAL",
         OpCode::Greater => "OP_GREATER",
         OpCode::Less => "OP_LESS",

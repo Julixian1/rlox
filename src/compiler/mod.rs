@@ -221,7 +221,11 @@ impl Compiler {
             }
             Var::Global => {
                 let k = self.identifier_constant(name)?;
-                self.emit(OpCode::GetGlobal(k));
+                if self.opt.indexed_globals {
+                    self.emit(OpCode::GetGlobalFast(k));
+                } else {
+                    self.emit(OpCode::GetGlobal(k));
+                }
             }
         }
         Ok(())
@@ -611,7 +615,11 @@ impl ExprVisitor<CResult> for Compiler {
             }
             Var::Global => {
                 let k = self.identifier_constant(&name.lexeme)?;
-                self.emit(OpCode::SetGlobal(k));
+                if self.opt.indexed_globals {
+                    self.emit(OpCode::SetGlobalFast(k));
+                } else {
+                    self.emit(OpCode::SetGlobal(k));
+                }
             }
         }
         Ok(())
@@ -923,6 +931,8 @@ impl StmtVisitor<CResult> for Compiler {
             if is_local {
                 let slot = self.state().resolve_local(&name.lexeme).unwrap();
                 self.emit(OpCode::GetLocal(slot as u16));
+            } else if self.opt.indexed_globals {
+                self.emit(OpCode::GetGlobalFast(name_constant));
             } else {
                 self.emit(OpCode::GetGlobal(name_constant));
             }
@@ -937,6 +947,8 @@ impl StmtVisitor<CResult> for Compiler {
                 if is_local {
                     let slot = self.state().resolve_local(&name.lexeme).unwrap();
                     self.emit(OpCode::GetLocal(slot as u16));
+                } else if self.opt.indexed_globals {
+                    self.emit(OpCode::GetGlobalFast(name_constant));
                 } else {
                     self.emit(OpCode::GetGlobal(name_constant));
                 }

@@ -130,6 +130,7 @@ fn test_e1_levels_produce_identical_bytecode_and_output() {
             opt_no_opts.apply_flags("dce", false).unwrap();
             opt_no_opts.apply_flags("jumps", false).unwrap();
             opt_no_opts.apply_flags("invoke", false).unwrap();
+            opt_no_opts.apply_flags("globals", false).unwrap();
             let (_, code_no_opts) = run_with_opt(source, opt_no_opts);
             assert_eq!(
                 code_base, code_no_opts,
@@ -145,6 +146,8 @@ fn test_e1_levels_produce_identical_bytecode_and_output() {
     for level in [OptLevel::O1, OptLevel::O2] {
         let mut opt = OptConfig::from_level(level);
         opt.apply_flags("fold", false).unwrap();
+        opt.apply_flags("globals", false).unwrap();
+        opt.apply_flags("invoke", false).unwrap();
         let (out_opt, code_opt) = run_with_opt(const_src, opt);
         assert_eq!(out_base, out_opt);
         assert_eq!(code_base, code_opt);
@@ -2263,4 +2266,225 @@ fn test_e5a2_extraction_without_call() {
 
     assert_eq!(out_o0, "metodo A\n");
     assert_eq!(out_inv, "metodo A\n");
+}
+
+// ============================================================================
+// Pruebas E5.B: Indexed Globals (Fast Path con Inline Caching)
+// ============================================================================
+
+#[test]
+fn test_e5b_bytecode_emission_and_flags() {
+    let src = "var x = 10; x = x + 1; print x;";
+    let stmts = parse_and_check(src);
+
+    // 1. -O0: GetGlobal y SetGlobal, NO GetGlobalFast ni SetGlobalFast
+    let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::GetGlobal(_))));
+    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::SetGlobal(_))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::GetGlobalFast(_))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::SetGlobalFast(_))));
+
+    // 2. -O0 --opt=globals: GetGlobalFast y SetGlobalFast
+    let mut opt_globals = OptConfig::from_level(OptLevel::O0);
+    opt_globals.apply_flags("globals", true).unwrap();
+    let proto_globals = compiler::compile_with_opt(&stmts, opt_globals).unwrap();
+    assert!(find_opcode(&proto_globals, &|op| matches!(op, OpCode::GetGlobalFast(_))));
+    assert!(find_opcode(&proto_globals, &|op| matches!(op, OpCode::SetGlobalFast(_))));
+
+    // 3. -O2: GetGlobalFast activo por defecto
+    let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
+    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::GetGlobalFast(_))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::SetGlobalFast(_))));
+
+    // 4. -O2 --no-opt=globals: revierte a GetGlobal y SetGlobal
+    let mut opt_o2_no_globals = OptConfig::from_level(OptLevel::O2);
+    opt_o2_no_globals.apply_flags("globals", false).unwrap();
+    let proto_o2_no_globals = compiler::compile_with_opt(&stmts, opt_o2_no_globals).unwrap();
+    assert!(find_opcode(&proto_o2_no_globals, &|op| matches!(op, OpCode::GetGlobal(_))));
+    assert!(find_opcode(&proto_o2_no_globals, &|op| matches!(op, OpCode::SetGlobal(_))));
+    assert!(!find_opcode(&proto_o2_no_globals, &|op| matches!(op, OpCode::GetGlobalFast(_))));
+    assert!(!find_opcode(&proto_o2_no_globals, &|op| matches!(op, OpCode::SetGlobalFast(_))));
+}
+
+#[test]
+fn test_e5b_late_binding_and_functions() {
+    let src = r#"
+        fun f() {
+            return x;
+        }
+
+        var x = 10;
+        print f();
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_globals = OptConfig::from_level(OptLevel::O0);
+    opt_globals.apply_flags("globals", true).unwrap();
+    let (out_globals, _) = run_with_opt(src, opt_globals);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    assert_eq!(out_o0, "10\n");
+    assert_eq!(out_globals, "10\n");
+    assert_eq!(out_o2, "10\n");
+}
+
+#[test]
+fn test_e5b_undefined_global_read_and_assign_errors() {
+    // 1. Lectura de global inexistente
+    let src_read = "print variableInexistente;";
+    let stmts_read = parse_and_check(src_read);
+    let mut opt_globals = OptConfig::from_level(OptLevel::O0);
+    opt_globals.apply_flags("globals", true).unwrap();
+
+    let proto_r_o0 = compiler::compile_with_opt(&stmts_read, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_r_opt = compiler::compile_with_opt(&stmts_read, opt_globals.clone()).unwrap();
+
+    let mut vm_r_o0 = Vm::with_output(Vec::new());
+    let err_r_o0 = vm_r_o0.interpret(proto_r_o0).unwrap_err();
+
+    let mut vm_r_opt = Vm::with_output(Vec::new());
+    let err_r_opt = vm_r_opt.interpret(proto_r_opt).unwrap_err();
+
+    assert_eq!(err_r_o0, "[line 1] Error: Undefined variable 'variableInexistente'.");
+    assert_eq!(err_r_opt, "[line 1] Error: Undefined variable 'variableInexistente'.");
+
+    // 2. Asignación a global inexistente
+    let src_assign = "variableInexistente = 123;";
+    let stmts_assign = parse_and_check(src_assign);
+
+    let proto_a_o0 = compiler::compile_with_opt(&stmts_assign, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_a_opt = compiler::compile_with_opt(&stmts_assign, opt_globals).unwrap();
+
+    let mut vm_a_o0 = Vm::with_output(Vec::new());
+    let err_a_o0 = vm_a_o0.interpret(proto_a_o0).unwrap_err();
+
+    let mut vm_a_opt = Vm::with_output(Vec::new());
+    let err_a_opt = vm_a_opt.interpret(proto_a_opt).unwrap_err();
+
+    assert_eq!(err_a_o0, "[line 1] Error: Undefined variable 'variableInexistente'.");
+    assert_eq!(err_a_opt, "[line 1] Error: Undefined variable 'variableInexistente'.");
+}
+
+#[test]
+fn test_e5b_redefinition_top_level() {
+    let src1 = r#"
+        var x = 1;
+        var x = 2;
+        print x;
+    "#;
+    let (out1_o0, _) = run_with_opt(src1, OptConfig::from_level(OptLevel::O0));
+    let mut opt_g = OptConfig::from_level(OptLevel::O0);
+    opt_g.apply_flags("globals", true).unwrap();
+    let (out1_g, _) = run_with_opt(src1, opt_g.clone());
+    assert_eq!(out1_o0, "2\n");
+    assert_eq!(out1_g, "2\n");
+
+    let src2 = r#"
+        var x = 1;
+        var x = x + 10;
+        print x;
+    "#;
+    let (out2_o0, _) = run_with_opt(src2, OptConfig::from_level(OptLevel::O0));
+    let (out2_g, _) = run_with_opt(src2, opt_g);
+    assert_eq!(out2_o0, "11\n");
+    assert_eq!(out2_g, "11\n");
+}
+
+#[test]
+fn test_e5b_closures_observing_mutated_globals() {
+    let src = r#"
+        var x = 1;
+        fun f() {
+            print x;
+        }
+        x = 2;
+        f();
+        x = 99;
+        f();
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_g = OptConfig::from_level(OptLevel::O0);
+    opt_g.apply_flags("globals", true).unwrap();
+    let (out_g, _) = run_with_opt(src, opt_g);
+    assert_eq!(out_o0, "2\n99\n");
+    assert_eq!(out_g, "2\n99\n");
+}
+
+#[test]
+fn test_e5b_multiple_interpret_calls_repl_continuity() {
+    let mut opt_g = OptConfig::from_level(OptLevel::O0);
+    opt_g.apply_flags("globals", true).unwrap();
+
+    let stmts1 = parse_and_check("var a = 100;");
+    let proto1 = compiler::compile_with_opt(&stmts1, opt_g.clone()).unwrap();
+
+    let stmts2 = parse_and_check("var b = 200; print a + b;");
+    let proto2 = compiler::compile_with_opt(&stmts2, opt_g.clone()).unwrap();
+
+    let stmts3 = parse_and_check("a = a + 50; print a;");
+    let proto3 = compiler::compile_with_opt(&stmts3, opt_g).unwrap();
+
+    let mut buf = Vec::new();
+    let mut vm = Vm::with_output(&mut buf);
+    vm.interpret(proto1).unwrap();
+    vm.interpret(proto2).unwrap();
+    vm.interpret(proto3).unwrap();
+
+    let output = String::from_utf8(buf).unwrap().replace("\r\n", "\n");
+    assert_eq!(output, "300\n150\n");
+}
+
+#[test]
+fn test_e5b_isolated_vm_instances() {
+    let mut opt_g = OptConfig::from_level(OptLevel::O0);
+    opt_g.apply_flags("globals", true).unwrap();
+
+    let stmts = parse_and_check("print x;");
+    let proto = compiler::compile_with_opt(&stmts, opt_g).unwrap();
+
+    // VM 1 define x = "primera"
+    let mut buf1 = Vec::new();
+    let mut vm1 = Vm::with_output(&mut buf1);
+    let stmts1 = parse_and_check("var x = \"primera\";");
+    vm1.interpret(compiler::compile_with_opt(&stmts1, OptConfig::default()).unwrap()).unwrap();
+    vm1.interpret(proto.clone()).unwrap();
+
+    // VM 2 define x = "segunda"
+    let mut buf2 = Vec::new();
+    let mut vm2 = Vm::with_output(&mut buf2);
+    let stmts2 = parse_and_check("var x = \"segunda\";");
+    vm2.interpret(compiler::compile_with_opt(&stmts2, OptConfig::default()).unwrap()).unwrap();
+    vm2.interpret(proto).unwrap();
+
+    let out1 = String::from_utf8(buf1).unwrap().replace("\r\n", "\n");
+    let out2 = String::from_utf8(buf2).unwrap().replace("\r\n", "\n");
+    assert_eq!(out1, "primera\n");
+    assert_eq!(out2, "segunda\n");
+}
+
+#[test]
+fn test_e5b_composition_with_all_optimizations() {
+    let src = r#"
+        var i = 0;
+        var acc = 0;
+        while (i < 10) {
+            acc = acc + i;
+            i = i + 1;
+        }
+        print acc;
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_g = OptConfig::from_level(OptLevel::O0);
+    opt_g.apply_flags("globals", true).unwrap();
+    let (out_g, _) = run_with_opt(src, opt_g);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    let mut opt_o2_no_g = OptConfig::from_level(OptLevel::O2);
+    opt_o2_no_g.apply_flags("globals", false).unwrap();
+    let (out_o2_no_g, _) = run_with_opt(src, opt_o2_no_g);
+
+    let expected = "45\n";
+    assert_eq!(out_o0, expected);
+    assert_eq!(out_g, expected);
+    assert_eq!(out_o2, expected);
+    assert_eq!(out_o2_no_g, expected);
 }

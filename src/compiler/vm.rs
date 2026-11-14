@@ -25,7 +25,10 @@ struct PreparedCall {
 pub struct Vm<W: Write> {
     stack: Vec<Value>,
     frames: Vec<CallFrame>,
-    globals: HashMap<String, Value>,
+    global_names: HashMap<String, usize>,
+    global_values: Vec<Option<Value>>,
+    proto_ic_offsets: HashMap<usize, usize>,
+    ic_slots: Vec<u32>,
     open_upvalues: Vec<UpvalueRef>,
     prepared_calls: Vec<PreparedCall>,
     out: W,
@@ -42,7 +45,10 @@ impl<W: Write> Vm<W> {
         Vm {
             stack: Vec::with_capacity(256),
             frames: Vec::with_capacity(64),
-            globals: HashMap::new(),
+            global_names: HashMap::new(),
+            global_values: Vec::new(),
+            proto_ic_offsets: HashMap::new(),
+            ic_slots: Vec::new(),
             open_upvalues: Vec::new(),
             prepared_calls: Vec::with_capacity(16),
             out,
@@ -53,11 +59,26 @@ impl<W: Write> Vm<W> {
         self.out
     }
 
+    #[inline(always)]
+    fn get_or_init_ic_base(&mut self, proto: &FnProto) -> usize {
+        let proto_id = proto.id;
+        if let Some(&offset) = self.proto_ic_offsets.get(&proto_id) {
+            offset
+        } else {
+            let offset = self.ic_slots.len();
+            let count = proto.chunk.constants.len();
+            self.ic_slots.resize(offset + count, u32::MAX);
+            self.proto_ic_offsets.insert(proto_id, offset);
+            offset
+        }
+    }
+
     pub fn interpret(&mut self, script: Rc<FnProto>) -> Result<(), String> {
         self.reset();
         let closure = Rc::new(Closure::new(script));
+        let ic_base = self.get_or_init_ic_base(&closure.proto);
         self.stack.push(Value::Closure(Rc::clone(&closure)));
-        self.frames.push(CallFrame::new(closure, 0));
+        self.frames.push(CallFrame::new(closure, 0, ic_base));
         let result = self.run();
         if result.is_err() {
             self.reset();
@@ -175,7 +196,8 @@ impl<W: Write> Vm<W> {
             return Err("Stack overflow.".to_string());
         }
         let base = self.stack.len() - argc - 1;
-        self.frames.push(CallFrame::new(closure, base));
+        let ic_base = self.get_or_init_ic_base(&closure.proto);
+        self.frames.push(CallFrame::new(closure, base, ic_base));
         Ok(())
     }
 
@@ -183,6 +205,7 @@ impl<W: Write> Vm<W> {
         let mut closure = Rc::clone(&self.frames.last().expect("no hay frame").closure);
         let mut ip = 0;
         let mut base = 0;
+        let mut ic_base = self.frames.last().expect("no hay frame").ic_base;
 
         loop {
             let chunk = &closure.proto.chunk;
@@ -208,13 +231,23 @@ impl<W: Write> Vm<W> {
                 }
                 OpCode::DefineGlobal(k) => {
                     let value = self.pop();
-                    self.globals
-                        .insert(Self::name_at(chunk, k).to_string(), value);
+                    let name = Self::name_at(chunk, k);
+                    if let Some(&slot) = self.global_names.get(name) {
+                        self.global_values[slot] = Some(value);
+                    } else {
+                        let slot = self.global_values.len();
+                        self.global_values.push(Some(value));
+                        self.global_names.insert(name.to_string(), slot);
+                    }
                 }
                 OpCode::GetGlobal(k) => {
                     let name = Self::name_at(chunk, k);
-                    match self.globals.get(name).cloned() {
-                        Some(value) => self.stack.push(value),
+                    let val_opt = self
+                        .global_names
+                        .get(name)
+                        .and_then(|&slot| self.global_values.get(slot).and_then(|v| v.as_ref()));
+                    match val_opt {
+                        Some(value) => self.stack.push(value.clone()),
                         None => {
                             return Err(Self::error(
                                 chunk,
@@ -227,9 +260,63 @@ impl<W: Write> Vm<W> {
                 OpCode::SetGlobal(k) => {
                     let name = Self::name_at(chunk, k);
                     let value = self.peek().clone();
-                    match self.globals.get_mut(name) {
-                        Some(slot) => *slot = value,
-                        None => {
+                    let slot_opt = self.global_names.get(name).copied();
+                    match slot_opt {
+                        Some(slot) if self.global_values.get(slot).and_then(|v| v.as_ref()).is_some() => {
+                            self.global_values[slot] = Some(value);
+                        }
+                        _ => {
+                            return Err(Self::error(
+                                chunk,
+                                ip,
+                                &format!("Error: Undefined variable '{}'.", name),
+                            ));
+                        }
+                    }
+                }
+                OpCode::GetGlobalFast(k) => {
+                    let ic_idx = ic_base + k as usize;
+                    let slot = self.ic_slots[ic_idx];
+                    if slot != u32::MAX {
+                        if let Some(ref val) = self.global_values[slot as usize] {
+                            self.stack.push(val.clone());
+                            continue;
+                        }
+                    }
+
+                    let name = Self::name_at(chunk, k);
+                    match self.global_names.get(name).copied() {
+                        Some(slot) if self.global_values.get(slot).and_then(|v| v.as_ref()).is_some() => {
+                            self.ic_slots[ic_idx] = slot as u32;
+                            self.stack.push(self.global_values[slot].as_ref().unwrap().clone());
+                        }
+                        _ => {
+                            return Err(Self::error(
+                                chunk,
+                                ip,
+                                &format!("Error: Undefined variable '{}'.", name),
+                            ));
+                        }
+                    }
+                }
+                OpCode::SetGlobalFast(k) => {
+                    let value = self.peek().clone();
+                    let ic_idx = ic_base + k as usize;
+                    let slot = self.ic_slots[ic_idx];
+                    if slot != u32::MAX {
+                        if self.global_values.get(slot as usize).and_then(|v| v.as_ref()).is_some() {
+                            self.global_values[slot as usize] = Some(value);
+                            continue;
+                        }
+                    }
+
+                    let name = Self::name_at(chunk, k);
+                    match self.global_names.get(name).copied() {
+                        Some(slot) if self.global_values.get(slot).and_then(|v| v.as_ref()).is_some() => {
+                            self.ic_slots[ic_idx] = slot as u32;
+                            self.global_values[slot] = Some(value);
+                        }
+                        _ => {
                             return Err(Self::error(
                                 chunk,
                                 ip,
@@ -325,6 +412,7 @@ impl<W: Write> Vm<W> {
                             closure = c;
                             ip = 0;
                             base = callee_slot;
+                            ic_base = self.frames.last().expect("no hay frame").ic_base;
                         }
                         Value::BoundMethod(bound) => {
                             let receiver = bound.receiver.clone();
@@ -335,6 +423,7 @@ impl<W: Write> Vm<W> {
                             closure = method;
                             ip = 0;
                             base = callee_slot;
+                            ic_base = self.frames.last().expect("no hay frame").ic_base;
                         }
                         Value::VmClass(klass) => {
                             let klass = Rc::clone(klass);
@@ -349,6 +438,7 @@ impl<W: Write> Vm<W> {
                                 closure = init;
                                 ip = 0;
                                 base = callee_slot;
+                                ic_base = self.frames.last().expect("no hay frame").ic_base;
                             } else if argc != 0 {
                                 return Err(Self::error(
                                     chunk,
@@ -451,6 +541,7 @@ impl<W: Write> Vm<W> {
                             closure = method;
                             ip = 0;
                             base = callee_slot;
+                            ic_base = self.frames.last().expect("no hay frame").ic_base;
                         }
                         PreparedCallable::Field(field_val) => {
                             self.stack[callee_slot] = field_val;
@@ -463,6 +554,7 @@ impl<W: Write> Vm<W> {
                                     closure = c;
                                     ip = 0;
                                     base = callee_slot;
+                                    ic_base = self.frames.last().expect("no hay frame").ic_base;
                                 }
                                 Value::BoundMethod(bound) => {
                                     let receiver = bound.receiver.clone();
@@ -473,6 +565,7 @@ impl<W: Write> Vm<W> {
                                     closure = method;
                                     ip = 0;
                                     base = callee_slot;
+                                    ic_base = self.frames.last().expect("no hay frame").ic_base;
                                 }
                                 Value::VmClass(klass) => {
                                     let klass = Rc::clone(klass);
@@ -487,6 +580,7 @@ impl<W: Write> Vm<W> {
                                         closure = init;
                                         ip = 0;
                                         base = callee_slot;
+                                        ic_base = self.frames.last().expect("no hay frame").ic_base;
                                     } else if argc != 0 {
                                         return Err(Self::error(
                                             chunk,
@@ -660,6 +754,7 @@ impl<W: Write> Vm<W> {
                     closure = Rc::clone(&caller.closure);
                     ip = caller.ip;
                     base = caller.base;
+                    ic_base = caller.ic_base;
                 }
             }
         }

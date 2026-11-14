@@ -3,6 +3,9 @@ use crate::value::Value;
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+static NEXT_PROTO_ID: AtomicUsize = AtomicUsize::new(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct UpvalueDesc {
@@ -12,6 +15,7 @@ pub struct UpvalueDesc {
 
 #[derive(Clone)]
 pub struct FnProto {
+    pub id: usize,
     pub name: Option<String>,
     pub arity: usize,
     pub chunk: Chunk,
@@ -21,6 +25,7 @@ pub struct FnProto {
 impl FnProto {
     pub fn new(name: Option<String>) -> Self {
         FnProto {
+            id: NEXT_PROTO_ID.fetch_add(1, Ordering::Relaxed),
             name,
             arity: 0,
             chunk: Chunk::new(),
@@ -151,14 +156,16 @@ pub struct CallFrame {
     pub closure: Rc<Closure>,
     pub ip: usize,
     pub base: usize,
+    pub ic_base: usize,
 }
 
 impl CallFrame {
-    pub fn new(closure: Rc<Closure>, base: usize) -> Self {
+    pub fn new(closure: Rc<Closure>, base: usize, ic_base: usize) -> Self {
         CallFrame {
             closure,
             ip: 0,
             base,
+            ic_base,
         }
     }
 }
