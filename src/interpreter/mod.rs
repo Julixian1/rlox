@@ -228,7 +228,7 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
         );
         self.environment
             .borrow_mut()
-            .define(name.lexeme.clone(), Value::Function(function));
+            .define(name.lexeme.clone(), Value::Function(Rc::new(function)));
         Ok(())
     }
 
@@ -587,6 +587,6 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             })?;
 
         // 4. Ligar a la instancia receptora
-        Ok(Value::Function(method_fn.bind(instance)))
+        Ok(Value::Function(Rc::new(method_fn.bind(instance))))
     }
 }

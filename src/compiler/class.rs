@@ -84,7 +84,7 @@ impl LoxInstance {
         let class = instance.borrow().class.clone();
         if let Some(method) = class.borrow().find_method(name) {
             let bound = method.bind(Rc::clone(instance));
-            return Some(Value::Function(bound));
+            return Some(Value::Function(Rc::new(bound)));
         }
         None
     }

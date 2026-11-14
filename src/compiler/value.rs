@@ -1,12 +1,12 @@
 use crate::class::{LoxClass, LoxInstance};
 use crate::closure::{Closure, FnProto};
+use crate::compiler::reg::closure::{RegClosure, RegProto};
 use crate::expr::LiteralValue;
 use crate::function::LoxFunction;
 use crate::vm_class::{BoundMethod, VmClass, VmInstance};
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
-use crate::compiler::reg::closure::{RegClosure, RegProto};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -14,7 +14,7 @@ pub enum Value {
     String(String),
     Boolean(bool),
     Nil,
-    Function(LoxFunction),
+    Function(Rc<LoxFunction>),
     Class(Rc<RefCell<LoxClass>>),
     Instance(Rc<RefCell<LoxInstance>>),
     Proto(Rc<FnProto>),
@@ -33,7 +33,7 @@ impl PartialEq for Value {
             (Value::String(a), Value::String(b)) => a == b,
             (Value::Boolean(a), Value::Boolean(b)) => a == b,
             (Value::Nil, Value::Nil) => true,
-            (Value::Function(a), Value::Function(b)) => a == b,
+            (Value::Function(a), Value::Function(b)) => Rc::ptr_eq(a, b) || a == b,
             (Value::Class(a), Value::Class(b)) => Rc::ptr_eq(a, b),
             (Value::Instance(a), Value::Instance(b)) => Rc::ptr_eq(a, b),
             (Value::Proto(a), Value::Proto(b)) => Rc::ptr_eq(a, b),

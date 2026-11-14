@@ -35,6 +35,16 @@ fn run_with_opt(source: &str, opt: OptConfig) -> (String, Vec<rlox::chunk::OpCod
 }
 
 #[test]
+fn test_e2_value_representation_size() {
+    let size_val = std::mem::size_of::<rlox::value::Value>();
+    let size_fn = std::mem::size_of::<rlox::compiler::function::LoxFunction>();
+    println!("SIZEOF_VALUE = {}", size_val);
+    println!("SIZEOF_LOX_FUNCTION = {}", size_fn);
+    assert_eq!(size_fn, 120);
+    assert_eq!(size_val, 24);
+}
+
+#[test]
 fn test_opt_config_levels_and_flags() {
     let o0 = OptConfig::from_level(OptLevel::O0);
     assert_eq!(o0.level, OptLevel::O0);
@@ -120,4 +130,37 @@ fn test_e1_levels_produce_identical_bytecode_and_output() {
             );
         }
     }
+}
+
+#[test]
+fn test_e2_function_rc_identity_and_semantics() {
+    let src = r#"
+        fun foo() {}
+        var f1 = foo;
+        var f2 = foo;
+
+        fun make() {
+            fun inner() {}
+            return inner;
+        }
+        var m1 = make();
+        var m2 = make();
+    "#;
+
+    let mut interpreter = rlox::interpreter::Interpreter::new();
+    let mut scanner = Scanner::new(src.to_string());
+    let tokens = scanner.scan_tokens().unwrap();
+    let mut parser = Parser::new(tokens);
+    let stmts = parser.parse().unwrap();
+    let errors = checker::check(&stmts);
+    assert!(errors.is_empty());
+
+    let mut resolver = rlox::resolver::Resolver::new();
+    resolver.resolve_stmts(&stmts);
+    for (ptr, depth) in resolver.locals {
+        interpreter.resolve(ptr, depth);
+    }
+
+    let result = interpreter.interpret(&stmts);
+    assert!(result.is_ok());
 }
