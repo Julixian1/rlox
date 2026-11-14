@@ -1,6 +1,9 @@
 use rlox::checker;
-use rlox::compiler;
 use rlox::compiler::reg::{codegen, vm::RegVm};
+use rlox::compiler::{
+    self,
+    opt::{OptConfig, OptLevel},
+};
 use rlox::interpreter::Interpreter;
 use rlox::parser::Parser;
 use rlox::resolver::Resolver;
@@ -13,7 +16,7 @@ use std::io::{self, Write};
 
 enum Backend {
     TreeWalk(Interpreter),
-    Bytecode(Vm<io::Stdout>),
+    Bytecode(Vm<io::Stdout>, OptConfig),
     Register(RegVm<io::Stdout>),
 }
 
@@ -36,8 +39,8 @@ impl Backend {
                     eprintln!("Runtime Error: {}", e);
                 }
             }
-            Backend::Bytecode(vm) => {
-                let script = match compiler::compile(&statements) {
+            Backend::Bytecode(vm, opt_config) => {
+                let script = match compiler::compile_with_opt(&statements, opt_config.clone()) {
                     Ok(s) => s,
                     Err(e) => {
                         eprintln!("Compile Error: {}", e);
@@ -105,26 +108,85 @@ fn parse_and_check(source: String) -> Option<Vec<Stmt>> {
 }
 
 fn main() {
-    let flags: Vec<String> = env::args().skip(1).collect();
-    let use_vm = flags.iter().any(|a| a == "--vm");
-    let use_reg = flags.iter().any(|a| a == "--reg");
-    let args: Vec<String> = env::args()
-        .filter(|a| a != "--vm" && a != "--reg")
-        .collect();
+    let raw_args: Vec<String> = env::args().skip(1).collect();
+    let mut use_vm = false;
+    let mut use_reg = false;
+    let mut opt_config = OptConfig::default(); // default -O0
+    let mut opt_flags_specified = Vec::new();
+    let mut positional_args = Vec::new();
+
+    for arg in raw_args {
+        match arg.as_str() {
+            "--vm" => use_vm = true,
+            "--reg" => use_reg = true,
+            "-O0" => {
+                opt_config = OptConfig::from_level(OptLevel::O0);
+                opt_flags_specified.push(arg);
+            }
+            "-O1" => {
+                opt_config = OptConfig::from_level(OptLevel::O1);
+                opt_flags_specified.push(arg);
+            }
+            "-O2" => {
+                opt_config = OptConfig::from_level(OptLevel::O2);
+                opt_flags_specified.push(arg);
+            }
+            s if s.starts_with("--opt=") => {
+                let passes = &s["--opt=".len()..];
+                if let Err(e) = opt_config.apply_flags(passes, true) {
+                    eprintln!("Error de argumentos: {}", e);
+                    std::process::exit(64);
+                }
+                opt_flags_specified.push(arg);
+            }
+            s if s.starts_with("--no-opt=") => {
+                let passes = &s["--no-opt=".len()..];
+                if let Err(e) = opt_config.apply_flags(passes, false) {
+                    eprintln!("Error de argumentos: {}", e);
+                    std::process::exit(64);
+                }
+                opt_flags_specified.push(arg);
+            }
+            flag if flag.starts_with('-') => {
+                eprintln!("Error: Flag desconocido '{}'.", flag);
+                std::process::exit(64);
+            }
+            _ => positional_args.push(arg),
+        }
+    }
+
+    if use_vm && use_reg {
+        eprintln!("Error: No se pueden especificar --vm y --reg simultáneamente.");
+        std::process::exit(64);
+    }
+
+    if !use_vm && !opt_flags_specified.is_empty() {
+        let backend_name = if use_reg {
+            "VM de registros (--reg)"
+        } else {
+            "Tree-Walk"
+        };
+        eprintln!(
+            "Error: Los flags de optimización ({}) solo son válidos con la VM de pila (--vm). No están soportados en el backend {}.",
+            opt_flags_specified.join(", "),
+            backend_name
+        );
+        std::process::exit(64);
+    }
 
     let mut backend = if use_reg {
         Backend::Register(RegVm::new())
     } else if use_vm {
-        Backend::Bytecode(Vm::new())
+        Backend::Bytecode(Vm::new(), opt_config)
     } else {
         Backend::TreeWalk(Interpreter::new())
     };
 
-    if args.len() > 2 {
-        println!("Uso: rlox [--vm | --reg] [script]");
+    if positional_args.len() > 1 {
+        println!("Uso: rlox [--vm [-O0|-O1|-O2] [--opt=...] [--no-opt=...] | --reg] [script]");
         std::process::exit(64);
-    } else if args.len() == 2 {
-        let source = fs::read_to_string(&args[1]).expect("No se puede leer el archivo.");
+    } else if positional_args.len() == 1 {
+        let source = fs::read_to_string(&positional_args[0]).expect("No se puede leer el archivo.");
         backend.run(source);
     } else {
         let stdin = io::stdin();

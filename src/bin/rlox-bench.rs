@@ -9,8 +9,11 @@
 //! Permite calcular mediana, IQR, y exportar a formato CSV y consola tabular.
 
 use rlox::checker;
-use rlox::compiler;
 use rlox::compiler::reg::{codegen, vm::RegVm};
+use rlox::compiler::{
+    self,
+    opt::{OptConfig, OptLevel},
+};
 use rlox::interpreter::Interpreter;
 use rlox::parser::Parser;
 use rlox::resolver::Resolver;
@@ -39,6 +42,7 @@ struct BenchConfig {
     warmup: usize,
     reps: usize,
     backend: TargetBackend,
+    opt_config: OptConfig,
     csv_path: Option<PathBuf>,
     files: Vec<PathBuf>,
 }
@@ -204,6 +208,7 @@ fn parse_args() -> BenchConfig {
     let mut warmup = 3;
     let mut reps = 10;
     let mut backend = TargetBackend::Vm;
+    let mut opt_config = OptConfig::default(); // default -O0
     let mut csv_path = None;
     let mut files = Vec::new();
 
@@ -227,6 +232,33 @@ fn parse_args() -> BenchConfig {
                     "all" => TargetBackend::All,
                     other => panic!("Backend desconocido: {other}. Opciones: vm, reg, tree, all"),
                 };
+            }
+            "-O0" | "--opt-level=0" => {
+                opt_config = OptConfig::from_level(OptLevel::O0);
+            }
+            "-O1" | "--opt-level=1" => {
+                opt_config = OptConfig::from_level(OptLevel::O1);
+            }
+            "-O2" | "--opt-level=2" => {
+                opt_config = OptConfig::from_level(OptLevel::O2);
+            }
+            "--opt-level" => {
+                i += 1;
+                let lvl =
+                    OptLevel::parse(&args[i]).expect("nivel de optimización inválido (0, 1, 2)");
+                opt_config = OptConfig::from_level(lvl);
+            }
+            s if s.starts_with("--opt=") => {
+                let passes = &s["--opt=".len()..];
+                opt_config
+                    .apply_flags(passes, true)
+                    .expect("flags de optimización inválidos");
+            }
+            s if s.starts_with("--no-opt=") => {
+                let passes = &s["--no-opt=".len()..];
+                opt_config
+                    .apply_flags(passes, false)
+                    .expect("flags de optimización inválidos");
             }
             "--csv" => {
                 i += 1;
@@ -261,6 +293,7 @@ fn parse_args() -> BenchConfig {
         warmup,
         reps,
         backend,
+        opt_config,
         csv_path,
         files,
     }
@@ -282,11 +315,22 @@ fn bench_vm_program(
     source: &str,
     warmup: usize,
     reps: usize,
-) -> Result<(StatSummary, StatSummary, StatSummary, StatSummary, BytecodeStats, String), String> {
+    opt: OptConfig,
+) -> Result<
+    (
+        StatSummary,
+        StatSummary,
+        StatSummary,
+        StatSummary,
+        BytecodeStats,
+        String,
+    ),
+    String,
+> {
     // 1. Warmup
     for _ in 0..warmup {
         let stmts = run_frontend(source)?;
-        let proto = compiler::compile(&stmts)?;
+        let proto = compiler::compile_with_opt(&stmts, opt.clone())?;
         let mut out = Vec::new();
         let mut vm = Vm::with_output(&mut out);
         vm.interpret(proto)?;
@@ -312,7 +356,7 @@ fn bench_vm_program(
         let d_front = start_front.elapsed();
 
         let start_compile = Instant::now();
-        let proto = compiler::compile(&stmts)?;
+        let proto = compiler::compile_with_opt(&stmts, opt.clone())?;
         let d_compile = start_compile.elapsed();
 
         let mut out = Vec::new();
@@ -348,7 +392,17 @@ fn bench_reg_program(
     source: &str,
     warmup: usize,
     reps: usize,
-) -> Result<(StatSummary, StatSummary, StatSummary, StatSummary, BytecodeStats, String), String> {
+) -> Result<
+    (
+        StatSummary,
+        StatSummary,
+        StatSummary,
+        StatSummary,
+        BytecodeStats,
+        String,
+    ),
+    String,
+> {
     for _ in 0..warmup {
         let stmts = run_frontend(source)?;
         let proto = codegen::compile(&stmts)?;
@@ -457,6 +511,8 @@ fn bench_tree_program(
 struct CsvRecord {
     benchmark: String,
     backend: String,
+    opt_level: String,
+    opt_passes: String,
     reps: usize,
     warmup: usize,
     front_med_ms: f64,
@@ -477,15 +533,27 @@ fn main() {
     let config = parse_args();
 
     println!("=== rlox benchmark runner ===");
-    println!("Configuración: warmup={}, reps={}, backend={:?}", config.warmup, config.reps, config.backend);
+    println!(
+        "Configuración: warmup={}, reps={}, backend={:?}, opt={}",
+        config.warmup, config.reps, config.backend, config.opt_config
+    );
     println!("Archivos evaluados: {}", config.files.len());
     println!();
 
     println!(
-        "{:<16} {:<7} {:>9} {:>9} {:>10} {:>9} {:>6} {:>6} {:>8}",
-        "benchmark", "backend", "front(ms)", "comp(ms)", "vm/run(ms)", "total(ms)", "ops", "const", "bytes"
+        "{:<16} {:<7} {:<8} {:>9} {:>9} {:>10} {:>9} {:>6} {:>6} {:>8}",
+        "benchmark",
+        "backend",
+        "opt",
+        "front(ms)",
+        "comp(ms)",
+        "vm/run(ms)",
+        "total(ms)",
+        "ops",
+        "const",
+        "bytes"
     );
-    println!("{}", "-".repeat(88));
+    println!("{}", "-".repeat(96));
 
     let mut csv_records: Vec<CsvRecord> = Vec::new();
 
@@ -502,12 +570,18 @@ fn main() {
 
         for b in backends_to_run {
             match b {
-                "vm" => match bench_vm_program(&source, config.warmup, config.reps) {
+                "vm" => match bench_vm_program(
+                    &source,
+                    config.warmup,
+                    config.reps,
+                    config.opt_config.clone(),
+                ) {
                     Ok((s_front, s_comp, s_vm, s_tot, stats, _out)) => {
                         println!(
-                            "{:<16} {:<7} {:>9.3} {:>9.3} {:>10.1} {:>9.1} {:>6} {:>6} {:>8}",
+                            "{:<16} {:<7} {:<8} {:>9.3} {:>9.3} {:>10.1} {:>9.1} {:>6} {:>6} {:>8}",
                             stem,
                             "vm",
+                            format!("{:?}", config.opt_config.level),
                             s_front.median_ms,
                             s_comp.median_ms,
                             s_vm.median_ms,
@@ -519,6 +593,8 @@ fn main() {
                         csv_records.push(CsvRecord {
                             benchmark: stem.clone(),
                             backend: "vm".to_string(),
+                            opt_level: format!("{:?}", config.opt_config.level),
+                            opt_passes: config.opt_config.enabled_summary(),
                             reps: config.reps,
                             warmup: config.warmup,
                             front_med_ms: s_front.median_ms,
@@ -536,10 +612,17 @@ fn main() {
                         });
                     }
                     Err(e) => {
-                        println!("{:<16} {:<7} ERROR: {}", stem, "vm", e.lines().next().unwrap_or(""));
+                        println!(
+                            "{:<16} {:<7} ERROR: {}",
+                            stem,
+                            "vm",
+                            e.lines().next().unwrap_or("")
+                        );
                         csv_records.push(CsvRecord {
                             benchmark: stem.clone(),
                             backend: "vm".to_string(),
+                            opt_level: format!("{:?}", config.opt_config.level),
+                            opt_passes: config.opt_config.enabled_summary(),
                             reps: config.reps,
                             warmup: config.warmup,
                             front_med_ms: 0.0,
@@ -560,9 +643,10 @@ fn main() {
                 "reg" => match bench_reg_program(&source, config.warmup, config.reps) {
                     Ok((s_front, s_comp, s_vm, s_tot, stats, _out)) => {
                         println!(
-                            "{:<16} {:<7} {:>9.3} {:>9.3} {:>10.1} {:>9.1} {:>6} {:>6} {:>8}",
+                            "{:<16} {:<7} {:<8} {:>9.3} {:>9.3} {:>10.1} {:>9.1} {:>6} {:>6} {:>8}",
                             stem,
                             "reg",
+                            "-",
                             s_front.median_ms,
                             s_comp.median_ms,
                             s_vm.median_ms,
@@ -574,6 +658,8 @@ fn main() {
                         csv_records.push(CsvRecord {
                             benchmark: stem.clone(),
                             backend: "reg".to_string(),
+                            opt_level: "n/a".to_string(),
+                            opt_passes: "none".to_string(),
                             reps: config.reps,
                             warmup: config.warmup,
                             front_med_ms: s_front.median_ms,
@@ -596,10 +682,12 @@ fn main() {
                         } else {
                             "unsupported"
                         };
-                        println!("{:<16} {:<7} {}", stem, "reg", short_msg);
+                        println!("{:<16} {:<7} {:<8} {}", stem, "reg", "-", short_msg);
                         csv_records.push(CsvRecord {
                             benchmark: stem.clone(),
                             backend: "reg".to_string(),
+                            opt_level: "n/a".to_string(),
+                            opt_passes: "none".to_string(),
                             reps: config.reps,
                             warmup: config.warmup,
                             front_med_ms: 0.0,
@@ -620,9 +708,10 @@ fn main() {
                 "tree" => match bench_tree_program(&source, config.warmup, config.reps) {
                     Ok((s_front, s_run, _out)) => {
                         println!(
-                            "{:<16} {:<7} {:>9.3} {:>9} {:>10.1} {:>9.1} {:>6} {:>6} {:>8}",
+                            "{:<16} {:<7} {:<8} {:>9.3} {:>9} {:>10.1} {:>9.1} {:>6} {:>6} {:>8}",
                             stem,
                             "tree",
+                            "-",
                             s_front.median_ms,
                             "-",
                             s_run.median_ms,
@@ -634,6 +723,8 @@ fn main() {
                         csv_records.push(CsvRecord {
                             benchmark: stem.clone(),
                             backend: "tree".to_string(),
+                            opt_level: "n/a".to_string(),
+                            opt_passes: "none".to_string(),
                             reps: config.reps,
                             warmup: config.warmup,
                             front_med_ms: s_front.median_ms,
@@ -663,14 +754,16 @@ fn main() {
         let mut file = fs::File::create(path).expect("crear archivo CSV");
         writeln!(
             file,
-            "benchmark,backend,reps,warmup,front_med_ms,front_iqr_ms,comp_med_ms,comp_iqr_ms,vm_med_ms,vm_iqr_ms,total_med_ms,total_iqr_ms,instructions,constants,approx_bytes,status"
+            "benchmark,backend,opt_level,opt_passes,reps,warmup,front_med_ms,front_iqr_ms,comp_med_ms,comp_iqr_ms,vm_med_ms,vm_iqr_ms,total_med_ms,total_iqr_ms,instructions,constants,approx_bytes,status"
         ).unwrap();
         for r in csv_records {
             writeln!(
                 file,
-                "{},{},{},{},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{},\"{}\"",
+                "{},{},{},{},{},{},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{:.4},{},{},{},\"{}\"",
                 r.benchmark,
                 r.backend,
+                r.opt_level,
+                r.opt_passes,
                 r.reps,
                 r.warmup,
                 r.front_med_ms,
@@ -685,7 +778,8 @@ fn main() {
                 r.constants,
                 r.approx_bytes,
                 r.status.replace('"', "\"\"")
-            ).unwrap();
+            )
+            .unwrap();
         }
         println!();
         println!("Resultados exportados a CSV: {}", path.display());

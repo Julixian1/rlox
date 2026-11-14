@@ -2,10 +2,11 @@ pub mod chunk;
 pub mod class;
 pub mod closure;
 pub mod function;
+pub mod opt;
+pub mod reg;
 pub mod value;
 pub mod vm;
 pub mod vm_class;
-pub mod reg;
 
 use crate::chunk::{Chunk, OpCode};
 use crate::closure::{FnProto, UpvalueDesc};
@@ -14,6 +15,8 @@ use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::{Token, TokenType};
 use crate::value::Value;
 use std::rc::Rc;
+
+pub use opt::{OptConfig, OptLevel, OptPass};
 
 type CResult = Result<(), String>;
 
@@ -75,18 +78,29 @@ pub struct Compiler {
     fns: Vec<FnState>,
     classes: Vec<ClassState>,
     line: usize,
+    #[allow(dead_code)]
+    pub opt: OptConfig,
 }
 
 pub fn compile(statements: &[Stmt]) -> Result<Rc<FnProto>, String> {
     Compiler::new().compile(statements)
 }
 
+pub fn compile_with_opt(statements: &[Stmt], opt: OptConfig) -> Result<Rc<FnProto>, String> {
+    Compiler::with_opt(opt).compile(statements)
+}
+
 impl Compiler {
     pub fn new() -> Self {
+        Self::with_opt(OptConfig::default())
+    }
+
+    pub fn with_opt(opt: OptConfig) -> Self {
         Compiler {
             fns: vec![FnState::new(None, FnKind::Script)],
             classes: Vec::new(),
             line: 1,
+            opt,
         }
     }
 

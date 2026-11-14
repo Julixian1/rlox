@@ -5,6 +5,6 @@ pub mod frontend;
 pub mod interpreter;
 
 // exports compatibles.
-pub use compiler::{chunk, class, closure, function, value, vm, vm_class};
+pub use compiler::{chunk, class, closure, function, opt, value, vm, vm_class};
 pub use frontend::{expr, parser, scanner, stmt, token};
 pub use interpreter::{checker, environment, resolver};
