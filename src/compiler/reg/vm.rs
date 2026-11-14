@@ -10,8 +10,8 @@ use std::rc::Rc;
 const FRAMES_MAX: usize = 100_000;
 
 pub struct RegVm<W: Write> {
-    /// Los registros de un frame son `stack[base + r]`.
-    stack: Vec<Value>,
+    /// Los registros de un frame son `registers[base + r]`.
+    registers: Vec<Value>,
     frames: Vec<RegFrame>,
     globals: HashMap<String, Value>,
     open_upvalues: Vec<UpvalueRef>,
@@ -27,7 +27,7 @@ impl RegVm<io::Stdout> {
 impl<W: Write> RegVm<W> {
     pub fn with_output(out: W) -> Self {
         RegVm {
-            stack: Vec::new(),
+            registers: Vec::new(),
             frames: Vec::new(),
             globals: HashMap::new(),
             open_upvalues: Vec::new(),
@@ -40,7 +40,7 @@ impl<W: Write> RegVm<W> {
     }
 
     pub fn interpret(&mut self, script: Rc<RegProto>) -> Result<(), String> {
-        self.stack.clear();
+        self.registers.clear();
         self.frames.clear();
         self.open_upvalues.clear();
 
@@ -50,7 +50,7 @@ impl<W: Write> RegVm<W> {
 
         let result = self.run();
         if result.is_err() {
-            self.stack.clear();
+            self.registers.clear();
             self.frames.clear();
             self.open_upvalues.clear();
         }
@@ -60,8 +60,8 @@ impl<W: Write> RegVm<W> {
     /// Asegura que existan los registros `base..base + regs`.
     fn reserve(&mut self, base: usize, regs: usize) {
         let needed = base + regs.max(1);
-        if self.stack.len() < needed {
-            self.stack.resize(needed, Value::Nil);
+        if self.registers.len() < needed {
+            self.registers.resize(needed, Value::Nil);
         }
     }
 
@@ -86,13 +86,13 @@ impl<W: Write> RegVm<W> {
         op: impl FnOnce(f64, f64) -> Value,
     ) -> Result<(), String> {
         let result = match (
-            &self.stack[base + b as usize],
-            &self.stack[base + c as usize],
+            &self.registers[base + b as usize],
+            &self.registers[base + c as usize],
         ) {
             (Value::Number(x), Value::Number(y)) => op(*x, *y),
             _ => return Err(Self::error(chunk, ip, "Operands must be numbers.")),
         };
-        self.stack[base + a as usize] = result;
+        self.registers[base + a as usize] = result;
         Ok(())
     }
 
@@ -129,13 +129,13 @@ impl<W: Write> RegVm<W> {
             .is_some_and(|u| Self::open_index(u) >= last)
         {
             let upvalue = self.open_upvalues.pop().expect("recién comprobado");
-            upvalue.borrow_mut().close(&self.stack);
+            upvalue.borrow_mut().close(&self.registers);
         }
     }
 
     // ---- llamadas ---------------------------------------------------------
 
-    /// Apila el frame de `closure`. Su registro 0 es `stack[callee + 1]`, o sea
+    /// Apila el frame de `closure`. Su registro 0 es `registers[callee + 1]`, o sea
     /// el primer argumento que dejó el llamador.
     fn call(&mut self, closure: Rc<RegClosure>, callee: usize, argc: usize) -> Result<(), String> {
         if closure.arity() != argc {
@@ -165,19 +165,19 @@ impl<W: Write> RegVm<W> {
             ip += 1;
             match op {
                 RegOp::LoadK(d, k) => {
-                    self.stack[base + d as usize] = chunk.constants[k as usize].clone();
+                    self.registers[base + d as usize] = chunk.constants[k as usize].clone();
                 }
-                RegOp::LoadNil(d) => self.stack[base + d as usize] = Value::Nil,
-                RegOp::LoadBool(d, b) => self.stack[base + d as usize] = Value::Boolean(b),
+                RegOp::LoadNil(d) => self.registers[base + d as usize] = Value::Nil,
+                RegOp::LoadBool(d, b) => self.registers[base + d as usize] = Value::Boolean(b),
                 RegOp::Move(d, s) => {
-                    let value = self.stack[base + s as usize].clone();
-                    self.stack[base + d as usize] = value;
+                    let value = self.registers[base + s as usize].clone();
+                    self.registers[base + d as usize] = value;
                 }
 
                 RegOp::Add(d, b, c) => {
                     let result = match (
-                        &self.stack[base + b as usize],
-                        &self.stack[base + c as usize],
+                        &self.registers[base + b as usize],
+                        &self.registers[base + c as usize],
                     ) {
                         (Value::Number(x), Value::Number(y)) => Value::Number(x + y),
                         (Value::String(x), Value::String(y)) => {
@@ -194,7 +194,7 @@ impl<W: Write> RegVm<W> {
                             ));
                         }
                     };
-                    self.stack[base + d as usize] = result;
+                    self.registers[base + d as usize] = result;
                 }
                 RegOp::Sub(d, b, c) => {
                     self.numeric(chunk, ip, base, (d, b, c), |x, y| Value::Number(x - y))?
@@ -210,22 +210,22 @@ impl<W: Write> RegVm<W> {
                 }
 
                 RegOp::Neg(d, s) => {
-                    let result = match &self.stack[base + s as usize] {
+                    let result = match &self.registers[base + s as usize] {
                         Value::Number(n) => Value::Number(-*n),
                         _ => return Err(Self::error(chunk, ip, "Operand must be a number.")),
                     };
-                    self.stack[base + d as usize] = result;
+                    self.registers[base + d as usize] = result;
                 }
                 RegOp::Not(d, s) => {
-                    let result = Value::Boolean(!self.stack[base + s as usize].is_truthy());
-                    self.stack[base + d as usize] = result;
+                    let result = Value::Boolean(!self.registers[base + s as usize].is_truthy());
+                    self.registers[base + d as usize] = result;
                 }
 
                 RegOp::Eq(d, b, c) => {
                     let result = Value::Boolean(
-                        self.stack[base + b as usize] == self.stack[base + c as usize],
+                        self.registers[base + b as usize] == self.registers[base + c as usize],
                     );
-                    self.stack[base + d as usize] = result;
+                    self.registers[base + d as usize] = result;
                 }
                 RegOp::Lt(d, b, c) => {
                     self.numeric(chunk, ip, base, (d, b, c), |x, y| Value::Boolean(x < y))?
@@ -236,7 +236,7 @@ impl<W: Write> RegVm<W> {
 
                 RegOp::Jump(offset) => ip += offset as usize,
                 RegOp::JumpIfFalse(r, offset) => {
-                    if !self.stack[base + r as usize].is_truthy() {
+                    if !self.registers[base + r as usize].is_truthy() {
                         ip += offset as usize;
                     }
                 }
@@ -245,7 +245,7 @@ impl<W: Write> RegVm<W> {
                 RegOp::GetGlobal(d, k) => {
                     let name = Self::name_at(chunk, k);
                     match self.globals.get(name).cloned() {
-                        Some(value) => self.stack[base + d as usize] = value,
+                        Some(value) => self.registers[base + d as usize] = value,
                         None => {
                             return Err(Self::error(
                                 chunk,
@@ -257,7 +257,7 @@ impl<W: Write> RegVm<W> {
                 }
                 RegOp::SetGlobal(k, s) => {
                     let name = Self::name_at(chunk, k);
-                    let value = self.stack[base + s as usize].clone();
+                    let value = self.registers[base + s as usize].clone();
                     match self.globals.get_mut(name) {
                         Some(slot) => *slot = value,
                         None => {
@@ -270,14 +270,14 @@ impl<W: Write> RegVm<W> {
                     }
                 }
                 RegOp::DefineGlobal(k, s) => {
-                    let value = self.stack[base + s as usize].clone();
+                    let value = self.registers[base + s as usize].clone();
                     self.globals
                         .insert(Self::name_at(chunk, k).to_string(), value);
                 }
 
                 RegOp::Call(a, argc) => {
                     let callee_reg = base + a as usize;
-                    let callee = self.stack[callee_reg].clone();
+                    let callee = self.registers[callee_reg].clone();
                     let called = match callee {
                         Value::RegClosure(c) => self.call(c, callee_reg, argc as usize),
                         _ => Err("Can only call functions and classes.".to_string()),
@@ -292,13 +292,13 @@ impl<W: Write> RegVm<W> {
                     base = frame.base;
                 }
                 RegOp::Return(r) => {
-                    let result = self.stack[base + r as usize].clone();
+                    let result = self.registers[base + r as usize].clone();
                     self.close_upvalues(base);
                     self.frames.pop();
                     match self.frames.last() {
                         None => return Ok(()),
                         Some(caller) => {
-                            self.stack[base - 1] = result;
+                            self.registers[base - 1] = result;
                             closure = Rc::clone(&caller.closure);
                             ip = caller.ip;
                             base = caller.base;
@@ -320,22 +320,22 @@ impl<W: Write> RegVm<W> {
                         };
                         new_closure.upvalues.push(upvalue);
                     }
-                    self.stack[base + d as usize] = Value::RegClosure(Rc::new(new_closure));
+                    self.registers[base + d as usize] = Value::RegClosure(Rc::new(new_closure));
                 }
                 RegOp::GetUpvalue(d, i) => {
-                    let value = closure.upvalues[i as usize].borrow().get(&self.stack);
-                    self.stack[base + d as usize] = value;
+                    let value = closure.upvalues[i as usize].borrow().get(&self.registers);
+                    self.registers[base + d as usize] = value;
                 }
                 RegOp::SetUpvalue(i, s) => {
-                    let value = self.stack[base + s as usize].clone();
+                    let value = self.registers[base + s as usize].clone();
                     closure.upvalues[i as usize]
                         .borrow_mut()
-                        .set(&mut self.stack, value);
+                        .set(&mut self.registers, value);
                 }
                 RegOp::Close(r) => self.close_upvalues(base + r as usize),
 
                 RegOp::Print(r) => {
-                    writeln!(self.out, "{}", self.stack[base + r as usize])
+                    writeln!(self.out, "{}", self.registers[base + r as usize])
                         .map_err(|e| e.to_string())?;
                 }
             }
