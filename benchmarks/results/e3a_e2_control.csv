@@ -1,0 +1,6 @@
+benchmark,backend,opt_level,opt_passes,reps,warmup,front_med_ms,front_iqr_ms,comp_med_ms,comp_iqr_ms,vm_med_ms,vm_iqr_ms,total_med_ms,total_iqr_ms,instructions,constants,approx_bytes,status
+arith_locals,vm,O0,none,10,3,0.0360,0.0059,0.0091,0.0008,517.2053,5.2516,517.2527,5.2582,38,9,672,"ok"
+arith_globals,vm,O0,none,10,3,0.0287,0.0053,0.0081,0.0017,982.7885,72.0265,982.8443,72.0245,33,9,612,"ok"
+const_expr,vm,O0,none,10,3,0.0419,0.0050,0.0101,0.0016,551.7756,131.8898,551.8520,131.8949,38,11,720,"ok"
+recursion,vm,O0,none,10,3,0.0315,0.0071,0.0094,0.0020,96.0479,4.1391,96.0914,4.1401,31,7,540,"ok"
+mixed,vm,O0,none,10,3,0.1272,0.0210,0.0217,0.0050,206.4543,23.3428,206.6042,23.3837,123,29,2172,"ok"
