@@ -56,6 +56,7 @@ pub enum OpCode {
     SetProperty(u16),
     CheckInstance,
     PrepareInvoke(u16),
+    PrepareSuperInvoke(u16),
     Invoke(u8),
 
     // Herencia
@@ -149,7 +150,8 @@ impl Chunk {
             | OpCode::GetProperty(i)
             | OpCode::SetProperty(i)
             | OpCode::GetSuper(i)
-            | OpCode::PrepareInvoke(i) => {
+            | OpCode::PrepareInvoke(i)
+            | OpCode::PrepareSuperInvoke(i) => {
                 format!(
                     "{:<14} {:4} '{}'",
                     name_of(&op),
@@ -238,6 +240,7 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::Inherit => "OP_INHERIT",
         OpCode::GetSuper(_) => "OP_GET_SUPER",
         OpCode::PrepareInvoke(_) => "OP_PREPARE_INVOKE",
+        OpCode::PrepareSuperInvoke(_) => "OP_PREPARE_SUPER_INVOKE",
         OpCode::Invoke(_) => "OP_INVOKE",
     }
 }

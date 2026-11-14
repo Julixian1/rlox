@@ -658,6 +658,32 @@ impl ExprVisitor<CResult> for Compiler {
                 self.emit(OpCode::Invoke(arguments.len() as u8));
                 return Ok(());
             }
+            if let Expr::Super { keyword, method } = callee {
+                self.line = keyword.line;
+                match self.classes.last() {
+                    None => return Err(self.error("Can't use 'super' outside of a class.")),
+                    Some(cs) if !cs.has_superclass => {
+                        return Err(self.error("Can't use 'super' in a class with no superclass."));
+                    }
+                    _ => {}
+                }
+                let this_var = self.resolve_variable("this")?;
+                self.emit_get_var(&this_var, "this")?;
+                let super_var = self.resolve_variable("super")?;
+                self.emit_get_var(&super_var, "super")?;
+                self.line = method.line;
+                let k = self.identifier_constant(&method.lexeme)?;
+                self.emit(OpCode::PrepareSuperInvoke(k));
+                for arg in arguments {
+                    arg.accept(self)?;
+                }
+                self.line = paren.line;
+                if arguments.len() > u8::MAX as usize {
+                    return Err(self.error("Can't have more than 255 arguments."));
+                }
+                self.emit(OpCode::Invoke(arguments.len() as u8));
+                return Ok(());
+            }
         }
 
         callee.accept(self)?;

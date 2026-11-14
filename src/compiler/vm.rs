@@ -399,6 +399,30 @@ impl<W: Write> Vm<W> {
                         _ => return Err(Self::error(chunk, ip, "Only instances have properties.")),
                     }
                 }
+                OpCode::PrepareSuperInvoke(k) => {
+                    let name = Self::name_at(chunk, k);
+                    let superclass_val = self.pop();
+                    let superclass = match superclass_val {
+                        Value::VmClass(ref k) => Rc::clone(k),
+                        _ => unreachable!("OP_PREPARE_SUPER_INVOKE espera una clase"),
+                    };
+
+                    if let Some(method) = superclass.borrow().methods.get(name).cloned() {
+                        let frame_depth = self.frames.len();
+                        let receiver_slot = self.stack.len() - 1;
+                        self.prepared_calls.push(PreparedCall {
+                            callable: PreparedCallable::Method(method),
+                            frame_depth,
+                            receiver_slot,
+                        });
+                    } else {
+                        return Err(Self::error(
+                            chunk,
+                            ip,
+                            &format!("Undefined property '{}'.", name),
+                        ));
+                    }
+                }
                 OpCode::Invoke(argc) => {
                     let argc = argc as usize;
                     let callee_slot = self.stack.len() - 1 - argc;

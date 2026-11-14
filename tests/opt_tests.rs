@@ -1963,3 +1963,304 @@ fn test_e5a1_field_shadowing_various_callables() {
     assert!(err_ar_o0.contains("Expected 2 arguments but got 1."));
     assert!(err_ar_inv.contains("Expected 2 arguments but got 1."));
 }
+
+// ============================================================================
+// Pruebas E5.A.2: SuperInvoke Optimization (PrepareSuperInvoke + Invoke)
+// ============================================================================
+
+#[test]
+fn test_e5a2_bytecode_emission_and_flags() {
+    let src = r#"
+        class A {
+            foo() { return 1; }
+        }
+        class B < A {
+            test() {
+                super.foo();
+            }
+            extract() {
+                var f = super.foo;
+                return f;
+            }
+        }
+    "#;
+    let stmts = parse_and_check(src);
+
+    // 1. Con -O0: no debe haber PrepareSuperInvoke
+    let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::GetSuper(_))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::PrepareSuperInvoke(_))));
+
+    // 2. Con -O0 --opt=invoke: llamada a super.foo() debe emitir PrepareSuperInvoke e Invoke
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let proto_inv = compiler::compile_with_opt(&stmts, opt_inv).unwrap();
+    assert!(find_opcode(&proto_inv, &|op| matches!(op, OpCode::PrepareSuperInvoke(_))));
+    assert!(find_opcode(&proto_inv, &|op| matches!(op, OpCode::Invoke(_))));
+    // Pero extract() sigue usando GetSuper porque no es llamada directa
+    assert!(find_opcode(&proto_inv, &|op| matches!(op, OpCode::GetSuper(_))));
+
+    // 3. Con -O2: PrepareSuperInvoke activo
+    let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
+    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::PrepareSuperInvoke(_))));
+
+    // 4. Con -O2 --no-opt=invoke: se desactiva
+    let mut opt_o2_no_inv = OptConfig::from_level(OptLevel::O2);
+    opt_o2_no_inv.apply_flags("invoke", false).unwrap();
+    let proto_o2_no_inv = compiler::compile_with_opt(&stmts, opt_o2_no_inv).unwrap();
+    assert!(!find_opcode(&proto_o2_no_inv, &|op| matches!(op, OpCode::PrepareSuperInvoke(_))));
+}
+
+#[test]
+fn test_e5a2_basic_and_multi_arguments_with_this_binding() {
+    let src = r#"
+        class A {
+            init(x) {
+                this.x = x;
+            }
+            calc(a, b, c) {
+                this.x = this.x + a * b - c;
+                return this.x;
+            }
+        }
+        class B < A {
+            test(a, b, c) {
+                return super.calc(a, b, c);
+            }
+        }
+
+        var b = B(100);
+        print b.test(2, 5, 10);
+        print b.x;
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src, opt_inv);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    let expected = "100\n100\n"; // 100 + 2*5 - 10 = 100
+    assert_eq!(out_o0, expected);
+    assert_eq!(out_inv, expected);
+    assert_eq!(out_o2, expected);
+}
+
+#[test]
+fn test_e5a2_three_level_hierarchy_and_override() {
+    let src = r#"
+        class A {
+            m() { return "A"; }
+        }
+        class B < A {
+            m() { return "B -> " + super.m(); }
+        }
+        class C < B {
+            m() { return "C -> " + super.m(); }
+        }
+
+        var c = C();
+        print c.m();
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src, opt_inv);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    let expected = "C -> B -> A\n";
+    assert_eq!(out_o0, expected);
+    assert_eq!(out_inv, expected);
+    assert_eq!(out_o2, expected);
+}
+
+#[test]
+fn test_e5a2_lexical_super_resolution_in_inherited_method() {
+    let src = r#"
+        class A {
+            method() { return "A"; }
+        }
+        class B < A {
+            method() { return "B"; }
+            test() { return super.method(); }
+        }
+        class C < B {
+            method() { return "C"; }
+        }
+
+        var c = C();
+        print c.test();
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src, opt_inv);
+
+    assert_eq!(out_o0, "A\n");
+    assert_eq!(out_inv, "A\n");
+}
+
+#[test]
+fn test_e5a2_undefined_method_and_error_precedence() {
+    let src = r#"
+        class A {}
+        class B < A {
+            test() {
+                super.inexistente(1 / 0);
+            }
+        }
+        B().test();
+    "#;
+    let stmts = parse_and_check(src);
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+
+    let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_inv = compiler::compile_with_opt(&stmts, opt_inv).unwrap();
+
+    let mut vm_o0 = Vm::with_output(Vec::new());
+    let err_o0 = vm_o0.interpret(proto_o0).unwrap_err();
+
+    let mut vm_inv = Vm::with_output(Vec::new());
+    let err_inv = vm_inv.interpret(proto_inv).unwrap_err();
+
+    assert!(err_o0.contains("Undefined property 'inexistente'."));
+    assert!(err_inv.contains("Undefined property 'inexistente'."));
+}
+
+#[test]
+fn test_e5a2_wrong_arity_error() {
+    let src = r#"
+        class A {
+            m(x, y) { return x + y; }
+        }
+        class B < A {
+            test() {
+                super.m(10);
+            }
+        }
+        B().test();
+    "#;
+    let stmts = parse_and_check(src);
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+
+    let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_inv = compiler::compile_with_opt(&stmts, opt_inv).unwrap();
+
+    let mut vm_o0 = Vm::with_output(Vec::new());
+    let err_o0 = vm_o0.interpret(proto_o0).unwrap_err();
+
+    let mut vm_inv = Vm::with_output(Vec::new());
+    let err_inv = vm_inv.interpret(proto_inv).unwrap_err();
+
+    assert!(err_o0.contains("Expected 2 arguments but got 1."));
+    assert!(err_inv.contains("Expected 2 arguments but got 1."));
+}
+
+#[test]
+fn test_e5a2_nested_prepare_invoke_and_prepare_super_invoke() {
+    let src = r#"
+        class A {
+            add(x, y) { return x + y; }
+        }
+        class B < A {
+            dup(x) { return x * 2; }
+            calc() {
+                return super.add(this.dup(10), super.add(2, 3));
+            }
+        }
+
+        var b = B();
+        print b.calc();
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src, opt_inv);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    // this.dup(10) = 20, super.add(2, 3) = 5, super.add(20, 5) = 25
+    assert_eq!(out_o0, "25\n");
+    assert_eq!(out_inv, "25\n");
+    assert_eq!(out_o2, "25\n");
+}
+
+#[test]
+fn test_e5a2_recursion_with_super() {
+    let src = r#"
+        class A {
+            fact(n) {
+                if (n <= 1) return 1;
+                return n * this.fact(n - 1);
+            }
+        }
+        class B < A {
+            fact(n) {
+                return super.fact(n);
+            }
+        }
+
+        var b = B();
+        print b.fact(6);
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src, opt_inv);
+
+    assert_eq!(out_o0, "720\n");
+    assert_eq!(out_inv, "720\n");
+}
+
+#[test]
+fn test_e5a2_closure_capturing_super() {
+    let src = r#"
+        class A {
+            greeting() { return "hola desde A"; }
+        }
+        class B < A {
+            makeClosure() {
+                fun f() {
+                    return super.greeting();
+                }
+                return f;
+            }
+        }
+
+        var b = B();
+        var clos = b.makeClosure();
+        print clos();
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src, opt_inv);
+
+    assert_eq!(out_o0, "hola desde A\n");
+    assert_eq!(out_inv, "hola desde A\n");
+}
+
+#[test]
+fn test_e5a2_extraction_without_call() {
+    let src = r#"
+        class A {
+            greet() { return "metodo A"; }
+        }
+        class B < A {
+            getGreeter() {
+                return super.greet;
+            }
+        }
+
+        var b = B();
+        var fn_ref = b.getGreeter();
+        print fn_ref();
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_inv = OptConfig::from_level(OptLevel::O0);
+    opt_inv.apply_flags("invoke", true).unwrap();
+    let (out_inv, _) = run_with_opt(src, opt_inv);
+
+    assert_eq!(out_o0, "metodo A\n");
+    assert_eq!(out_inv, "metodo A\n");
+}
