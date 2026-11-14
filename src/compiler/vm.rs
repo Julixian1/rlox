@@ -79,21 +79,34 @@ impl<W: Write> Vm<W> {
         format!("[line {}] {}", chunk.lines[ip - 1], msg)
     }
 
-    fn numeric(
-        &mut self,
-        chunk: &Chunk,
-        ip: usize,
-        op: impl FnOnce(f64, f64) -> Value,
-    ) -> Result<(), String> {
-        let b = self.pop();
-        let a = self.pop();
-        match (a, b) {
-            (Value::Number(x), Value::Number(y)) => {
-                self.stack.push(op(x, y));
-                Ok(())
-            }
-            _ => Err(Self::error(chunk, ip, "Operands must be numbers.")),
-        }
+    #[inline(always)]
+    fn binary_num<F>(&mut self, chunk: &Chunk, ip: usize, op: F) -> Result<(), String>
+    where
+        F: FnOnce(f64, f64) -> f64,
+    {
+        let len = self.stack.len();
+        let (x, y) = match (&self.stack[len - 2], &self.stack[len - 1]) {
+            (Value::Number(x), Value::Number(y)) => (*x, *y),
+            _ => return Err(Self::error(chunk, ip, "Operands must be numbers.")),
+        };
+        self.stack[len - 2] = Value::Number(op(x, y));
+        self.stack.pop();
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn binary_num_bool<F>(&mut self, chunk: &Chunk, ip: usize, op: F) -> Result<(), String>
+    where
+        F: FnOnce(f64, f64) -> bool,
+    {
+        let len = self.stack.len();
+        let (x, y) = match (&self.stack[len - 2], &self.stack[len - 1]) {
+            (Value::Number(x), Value::Number(y)) => (*x, *y),
+            _ => return Err(Self::error(chunk, ip, "Operands must be numbers.")),
+        };
+        self.stack[len - 2] = Value::Boolean(op(x, y));
+        self.stack.pop();
+        Ok(())
     }
 
     fn open_index(upvalue: &UpvalueRef) -> usize {
@@ -240,24 +253,33 @@ impl<W: Write> Vm<W> {
                 }
 
                 OpCode::Equal => {
-                    let b = self.pop();
-                    let a = self.pop();
-                    self.stack.push(Value::Boolean(a == b));
+                    let len = self.stack.len();
+                    let eq = self.stack[len - 2] == self.stack[len - 1];
+                    self.stack[len - 2] = Value::Boolean(eq);
+                    self.stack.pop();
                 }
-                OpCode::Greater => self.numeric(chunk, ip, |a, b| Value::Boolean(a > b))?,
-                OpCode::Less => self.numeric(chunk, ip, |a, b| Value::Boolean(a < b))?,
-                OpCode::GreaterEqual => self.numeric(chunk, ip, |a, b| Value::Boolean(a >= b))?,
-                OpCode::LessEqual => self.numeric(chunk, ip, |a, b| Value::Boolean(a <= b))?,
+                OpCode::Greater => self.binary_num_bool(chunk, ip, |a, b| a > b)?,
+                OpCode::Less => self.binary_num_bool(chunk, ip, |a, b| a < b)?,
+                OpCode::GreaterEqual => self.binary_num_bool(chunk, ip, |a, b| a >= b)?,
+                OpCode::LessEqual => self.binary_num_bool(chunk, ip, |a, b| a <= b)?,
                 OpCode::Add => {
-                    let b = self.pop();
-                    let a = self.pop();
-                    match (a, b) {
+                    let len = self.stack.len();
+                    match (&self.stack[len - 2], &self.stack[len - 1]) {
                         (Value::Number(x), Value::Number(y)) => {
-                            self.stack.push(Value::Number(x + y))
+                            let res = x + y;
+                            self.stack[len - 2] = Value::Number(res);
+                            self.stack.pop();
                         }
-                        (Value::String(mut x), Value::String(y)) => {
-                            x.push_str(&y);
-                            self.stack.push(Value::String(x));
+                        (Value::String(_), Value::String(_)) => {
+                            let b = self.pop();
+                            let a = self.pop();
+                            match (a, b) {
+                                (Value::String(mut x), Value::String(y)) => {
+                                    x.push_str(&y);
+                                    self.stack.push(Value::String(x));
+                                }
+                                _ => unreachable!(),
+                            }
                         }
                         _ => {
                             return Err(Self::error(
@@ -268,10 +290,10 @@ impl<W: Write> Vm<W> {
                         }
                     }
                 }
-                OpCode::Subtract => self.numeric(chunk, ip, |a, b| Value::Number(a - b))?,
-                OpCode::Multiply => self.numeric(chunk, ip, |a, b| Value::Number(a * b))?,
-                OpCode::Divide => self.numeric(chunk, ip, |a, b| Value::Number(a / b))?,
-                OpCode::Modulo => self.numeric(chunk, ip, |a, b| Value::Number(a % b))?,
+                OpCode::Subtract => self.binary_num(chunk, ip, |a, b| a - b)?,
+                OpCode::Multiply => self.binary_num(chunk, ip, |a, b| a * b)?,
+                OpCode::Divide => self.binary_num(chunk, ip, |a, b| a / b)?,
+                OpCode::Modulo => self.binary_num(chunk, ip, |a, b| a % b)?,
                 OpCode::Not => {
                     let value = self.pop();
                     self.stack.push(Value::Boolean(!value.is_truthy()));
