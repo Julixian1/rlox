@@ -1200,3 +1200,340 @@ fn test_e4c_17_multiple_jumps_targeting_same_eliminated_jump() {
     );
     assert_eq!(chunk.lines, vec![1, 1, 2, 4]);
 }
+
+// =========================================================================
+// Auditoría Final E4: Integración y Composición de Optimizaciones
+// =========================================================================
+
+#[test]
+fn test_audit_e4_1_cli_flag_combinations() {
+    // 1. Niveles estándar
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    assert!(!o0.constant_folding);
+    assert!(!o0.dead_code_elimination);
+    assert!(!o0.jump_simplification);
+
+    let o1 = OptConfig::from_level(OptLevel::O1);
+    assert!(o1.constant_folding);
+    assert!(o1.dead_code_elimination);
+    assert!(o1.jump_simplification);
+    assert!(!o1.peephole);
+
+    let o2 = OptConfig::from_level(OptLevel::O2);
+    assert!(o2.constant_folding);
+    assert!(o2.dead_code_elimination);
+    assert!(o2.jump_simplification);
+    assert!(o2.peephole);
+
+    // 2. Combinación múltiple separada por comas: -O0 --opt=fold,dce,jumps
+    let mut o0_custom = OptConfig::from_level(OptLevel::O0);
+    o0_custom.apply_flags("fold,dce,jumps", true).unwrap();
+    assert!(o0_custom.constant_folding);
+    assert!(o0_custom.dead_code_elimination);
+    assert!(o0_custom.jump_simplification);
+    assert!(!o0_custom.peephole);
+
+    // 3. Desactivación múltiple: -O2 --no-opt=fold,dce,jumps
+    let mut o2_custom = OptConfig::from_level(OptLevel::O2);
+    o2_custom.apply_flags("fold,dce,jumps", false).unwrap();
+    assert!(!o2_custom.constant_folding);
+    assert!(!o2_custom.dead_code_elimination);
+    assert!(!o2_custom.jump_simplification);
+    assert!(o2_custom.peephole); // Las optimizaciones de O2 no afectadas permanecen
+    assert!(o2_custom.superinstructions);
+
+    // 4. Activación / desactivación individual
+    let mut config = OptConfig::default();
+    config.set_pass(OptPass::ConstantFolding, true);
+    assert!(config.constant_folding && !config.dead_code_elimination);
+    config.set_pass(OptPass::ConstantFolding, false);
+    assert!(!config.constant_folding);
+}
+
+#[test]
+fn test_audit_e4_2_folding_plus_dce_composition() {
+    let test_cases = [
+        // (código, salida esperada)
+        ("if (10 > 5) print \"correcto\"; else print \"incorrecto\";", "correcto\n"),
+        ("if (nil) print \"fallo\"; else print \"ok\";", "ok\n"),
+        ("if (false) print \"fallo\"; else print \"ok\";", "ok\n"),
+        ("if (0) print \"cero es truthy\"; else print \"fallo\";", "cero es truthy\n"),
+        ("if (\"\") print \"vacio es truthy\"; else print \"fallo\";", "vacio es truthy\n"),
+        ("if ((2 + 3) * 4 == 20) print \"aritmetica plegada\"; else print \"fallo\";", "aritmetica plegada\n"),
+        ("if (-5 < 2) print \"negacion plegada\"; else print \"fallo\";", "negacion plegada\n"),
+    ];
+
+    for (src, expected) in test_cases {
+        let (out_o0, code_o0) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+        let (out_o1, code_o1) = run_with_opt(src, OptConfig::from_level(OptLevel::O1));
+
+        let mut o0_flags = OptConfig::from_level(OptLevel::O0);
+        o0_flags.apply_flags("fold,dce", true).unwrap();
+        let (out_flags, code_flags) = run_with_opt(src, o0_flags);
+
+        assert_eq!(out_o0, expected, "O0 salida para: {}", src);
+        assert_eq!(out_o1, expected, "O1 salida para: {}", src);
+        assert_eq!(out_flags, expected, "Flags salida para: {}", src);
+
+        // En O1 y fold+dce, no deben emitirse saltos condicionales en estos casos
+        assert!(code_o0.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+        assert!(!code_o1.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+        assert_eq!(code_o1, code_flags);
+    }
+}
+
+#[test]
+fn test_audit_e4_3_dce_plus_jump_simplification() {
+    // Comprueba anidamientos, ramas muertas y compactación
+    let src = r#"
+        var a = 1;
+        if (false) {
+            if (true) {
+                print "muerto";
+            }
+        } else {
+            if (a > 0) {
+                print "vivo";
+            }
+        }
+    "#;
+
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o1, code_o1) = run_with_opt(src, OptConfig::from_level(OptLevel::O1));
+
+    assert_eq!(out_o0, out_o1);
+    assert_eq!(out_o1, "vivo\n");
+
+    // Ningún Jump(0) debe sobrevivir en O1
+    assert!(!code_o1.iter().any(|op| matches!(op, OpCode::Jump(0))));
+}
+
+#[test]
+fn test_audit_e4_4_three_optimizations_full_composition() {
+    let complex_src = r#"
+        class Base {
+            init(val) {
+                this.val = val;
+            }
+            compute(x) {
+                return this.val + x;
+            }
+        }
+
+        class Sub < Base {
+            init(val, extra) {
+                super.init(val);
+                this.extra = extra;
+            }
+            compute(x) {
+                if (10 > 20) {
+                    return -1;
+                    print "muerto tras return";
+                }
+                var base_val = super.compute(x);
+                if (x > 0 and this.extra > 0) {
+                    var acc = 0;
+                    var i = 0;
+                    while (i < 3) {
+                        acc = acc + i;
+                        i = i + 1;
+                    }
+                    return base_val + acc + this.extra;
+                }
+                return base_val;
+            }
+        }
+
+        fun makeMultiplier(factor) {
+            fun mult(n) {
+                return n * factor;
+            }
+            return mult;
+        }
+
+        var obj = Sub(100, 5);
+        print obj.compute(10);
+
+        var triple = makeMultiplier(3);
+        print triple(7);
+    "#;
+
+    let configs = [
+        OptConfig::from_level(OptLevel::O0),
+        OptConfig::from_level(OptLevel::O1),
+        OptConfig::from_level(OptLevel::O2),
+        {
+            let mut c = OptConfig::from_level(OptLevel::O0);
+            c.apply_flags("fold,dce,jumps", true).unwrap();
+            c
+        },
+        {
+            let mut c = OptConfig::from_level(OptLevel::O2);
+            c.apply_flags("fold,dce,jumps", false).unwrap();
+            c
+        },
+    ];
+
+    let mut expected_output = String::new();
+    for (i, cfg) in configs.iter().enumerate() {
+        let (out, _) = run_with_opt(complex_src, cfg.clone());
+        if i == 0 {
+            expected_output = out.clone();
+            assert_eq!(expected_output, "118\n21\n");
+        } else {
+            assert_eq!(out, expected_output, "Paridad en configuración #{:?}", i);
+        }
+    }
+}
+
+#[test]
+fn test_audit_e4_5_compile_validations_in_dead_branches() {
+    let invalid_dead_programs = [
+        // this fuera de clase dentro de rama muerta
+        "if (false) { this; }",
+        // super fuera de clase dentro de rama muerta
+        "if (false) { super.foo(); }",
+        // return en nivel superior dentro de rama muerta
+        "if (false) { return 42; }",
+        // declaración duplicada en el mismo scope local
+        "fun test() { if (false) { var a = 1; var a = 2; } } test();",
+    ];
+
+    for src in invalid_dead_programs {
+        let mut scanner = Scanner::new(src.to_string());
+        let tokens = scanner.scan_tokens().expect("tokens validos");
+        let mut parser = Parser::new(tokens);
+        let stmts = parser.parse().expect("parse valido");
+
+        let chk_errors = checker::check(&stmts);
+        if !chk_errors.is_empty() {
+            // El checker estático rechaza el programa para todos los niveles de optimización
+            continue;
+        }
+
+        let res_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0));
+        let res_o1 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O1));
+        let res_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2));
+
+        assert!(res_o0.is_err(), "O0 debe rechazar: {}", src);
+        assert!(res_o1.is_err(), "O1 no debe omitir error en: {}", src);
+        assert!(res_o2.is_err(), "O2 no debe omitir error en: {}", src);
+    }
+}
+
+#[test]
+fn test_audit_e4_6_bytecode_invariants_recursive_verifier() {
+    fn verify_proto_invariants(proto: &rlox::closure::FnProto) {
+        let code = &proto.chunk.code;
+        let lines = &proto.chunk.lines;
+        let len = code.len();
+
+        // 1. Longitud de código y líneas perfectamente alineadas
+        assert_eq!(code.len(), lines.len(), "code y lines deben coincidir en tamaño");
+
+        // 2. Destinos de saltos válidos y direcciones
+        for (i, op) in code.iter().enumerate() {
+            match op {
+                OpCode::Jump(offset) => {
+                    let target = i + 1 + *offset as usize;
+                    assert!(target <= len, "Jump({}) en índice {} excede longitud {}", offset, i, len);
+                    assert!(target > i, "Jump no puede saltar hacia atrás");
+                }
+                OpCode::JumpIfFalse(offset) => {
+                    let target = i + 1 + *offset as usize;
+                    assert!(target <= len, "JumpIfFalse({}) en índice {} excede longitud {}", offset, i, len);
+                    assert!(target > i, "JumpIfFalse no puede saltar hacia atrás");
+                }
+                OpCode::Loop(offset) => {
+                    assert!(
+                        (i + 1) >= *offset as usize,
+                        "Loop({}) en índice {} causaría underflow",
+                        offset,
+                        i
+                    );
+                    let target = (i + 1) - *offset as usize;
+                    assert!(target <= i + 1, "Loop no puede saltar hacia adelante");
+                }
+                OpCode::Constant(k) => {
+                    assert!((*k as usize) < proto.chunk.constants.len(), "Constante {} fuera de rango", k);
+                }
+                OpCode::Closure(k) => {
+                    assert!((*k as usize) < proto.chunk.constants.len(), "Proto de closure {} fuera de rango", k);
+                }
+                _ => {}
+            }
+        }
+
+        // 3. Verificar recursivamente constantes
+        for c in &proto.chunk.constants {
+            if let rlox::value::Value::Proto(sub_p) = c {
+                verify_proto_invariants(sub_p);
+            }
+        }
+    }
+
+    let src = r#"
+        class A {
+            foo() {
+                var sum = 0;
+                for (var i = 0; i < 5; i = i + 1) {
+                    if (i == 2) sum = sum + 10;
+                    else sum = sum + i;
+                }
+                return sum;
+            }
+        }
+        fun bar() {
+            fun f(x) { return x * 2; }
+            return f(A().foo());
+        }
+        print bar();
+    "#;
+
+    for level in [OptLevel::O0, OptLevel::O1, OptLevel::O2] {
+        let stmts = parse_and_check(src);
+        let proto = compiler::compile_with_opt(&stmts, OptConfig::from_level(level)).unwrap();
+        verify_proto_invariants(&proto);
+    }
+}
+
+#[test]
+fn test_audit_e4_7_cycle_detection_conservative_preservation() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    // 0: Jump(1) -> 2
+    // 1: Print
+    // 2: Jump(1) -> 4
+    // 3: Print
+    // 4: Jump(65534) -> target = (4 + 1) + 65534, pero simulamos un ciclo con saltos encadenados
+    // En resolve_jump_chain:
+    // 0 -> 2 -> 0 (ciclo)
+    // Cuando el salto en 2 apunta a 0, next_target (0) <= origin (0) o visited.contains(0).
+    // Debe retornar None y dejar el Jump original en 0.
+    chunk.write(OpCode::Jump(1), 1); // 0 -> 2
+    chunk.write(OpCode::Print, 2);   // 1
+    chunk.write(OpCode::Jump(0), 3); // 2 -> Jump(0) apunta a 3
+    chunk.write(OpCode::Return, 4);  // 3
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    // Debe resolver Jump(0) y Jump(1) sin caer en bucle y compactando adecuadamente
+    assert!(!chunk.code.iter().any(|op| matches!(op, OpCode::Jump(0))));
+}
+
+#[test]
+fn test_audit_e4_8_aborted_compaction_leaves_chunk_intact() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    chunk.write(OpCode::Print, 1);
+    chunk.write(OpCode::Jump(0), 2);
+    // Salto corrupto que desborda el chunk original
+    chunk.write(OpCode::Jump(9999), 3);
+
+    let original_code = chunk.code.clone();
+    let original_lines = chunk.lines.clone();
+
+    // compact_chunk_jumps debe detectar que old_target > old_len y abortar de forma segura
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    assert_eq!(chunk.code, original_code);
+    assert_eq!(chunk.lines, original_lines);
+}

@@ -964,10 +964,11 @@ impl StmtVisitor<CResult> for Compiler {
 
 pub fn simplify_chunk_jumps(chunk: &mut Chunk) {
     // 1. Compactar primero eliminando físicamente Jump(0).
-    // Esto remueve saltos nulos a la siguiente instrucción, redirige de forma
-    // segura cualquier salto que apuntaba a ellos hacia la siguiente instrucción viva,
-    // y evita que Jump(0) sea reescrito a saltos no nulos durante el threading.
-    compact_chunk_jumps(chunk);
+    // Si la compactación detecta offsets inválidos o desbordamientos, aborta de forma segura
+    // dejando el chunk original completamente intacto.
+    if !compact_chunk_jumps(chunk) {
+        return;
+    }
 
     // 2. Aplicar Jump Threading sobre el chunk compactado.
     // Sigue cadenas de saltos incondicionales hasta su destino final
@@ -984,17 +985,19 @@ fn jump_threading(chunk: &mut Chunk) {
         match chunk.code[i] {
             OpCode::Jump(offset) => {
                 let target = i + 1 + offset as usize;
-                if let Some(final_target) = resolve_jump_chain(chunk, i, target) {
-                    if final_target > i {
-                        if let Ok(new_offset) = u16::try_from(final_target - (i + 1)) {
-                            chunk.code[i] = OpCode::Jump(new_offset);
+                if target <= len {
+                    if let Some(final_target) = resolve_jump_chain(chunk, i, target) {
+                        if final_target > i {
+                            if let Ok(new_offset) = u16::try_from(final_target - (i + 1)) {
+                                chunk.code[i] = OpCode::Jump(new_offset);
+                            }
                         }
                     }
                 }
             }
             OpCode::JumpIfFalse(offset) => {
                 let target = i + 1 + offset as usize;
-                // Solo redirigir si el destino inmediato es un Jump incondicional
+                // Solo redirigir si el destino inmediato es un Jump incondicional dentro del chunk
                 if target < len && matches!(chunk.code[target], OpCode::Jump(_)) {
                     if let Some(final_target) = resolve_jump_chain(chunk, i, target) {
                         if final_target > i {
@@ -1012,6 +1015,9 @@ fn jump_threading(chunk: &mut Chunk) {
 
 fn resolve_jump_chain(chunk: &Chunk, origin: usize, mut curr_target: usize) -> Option<usize> {
     let len = chunk.code.len();
+    if curr_target > len {
+        return None;
+    }
     let mut visited = HashSet::new();
     visited.insert(origin);
     visited.insert(curr_target);
@@ -1021,13 +1027,19 @@ fn resolve_jump_chain(chunk: &Chunk, origin: usize, mut curr_target: usize) -> O
     while curr_target < len {
         if let OpCode::Jump(next_offset) = chunk.code[curr_target] {
             let next_target = curr_target + 1 + next_offset as usize;
+            if next_target > len {
+                // Offset inválido fuera del chunk: abortar
+                return None;
+            }
             if next_target <= origin {
-                // No permitir convertir un salto hacia adelante en retroceso
-                break;
+                // No permitir convertir un salto hacia adelante en retroceso.
+                // Estrategia conservadora: mantener destino original.
+                return None;
             }
             if visited.contains(&next_target) {
-                // Ciclo detectado: detenerse y mantener el último destino no cíclico
-                break;
+                // Ciclo detectado: no existe destino terminal no-salto.
+                // Estrategia conservadora requerida por auditoría: mantener destino original intacto.
+                return None;
             }
             visited.insert(next_target);
             curr_target = next_target;
@@ -1044,10 +1056,10 @@ fn resolve_jump_chain(chunk: &Chunk, origin: usize, mut curr_target: usize) -> O
     }
 }
 
-fn compact_chunk_jumps(chunk: &mut Chunk) {
+fn compact_chunk_jumps(chunk: &mut Chunk) -> bool {
     let old_len = chunk.code.len();
     if old_len == 0 {
-        return;
+        return true;
     }
 
     // 1. Identificar instrucciones Jump(0) eliminables
@@ -1058,7 +1070,7 @@ fn compact_chunk_jumps(chunk: &mut Chunk) {
         .collect();
 
     if !to_remove.iter().any(|&b| b) {
-        return;
+        return true;
     }
 
     // 2. Construir mapa de supervivencia para instrucciones no eliminadas
@@ -1103,48 +1115,48 @@ fn compact_chunk_jumps(chunk: &mut Chunk) {
             OpCode::Jump(offset) => {
                 let old_target = old_i + 1 + offset as usize;
                 if old_target > old_len {
-                    return; // Offset inválido en chunk original, abortar compactación
+                    return false; // Offset inválido en chunk original, abortar compactación
                 }
                 let new_target = target_map[old_target];
                 if new_target <= new_i {
-                    return; // No puede saltar hacia atrás
+                    return false; // No puede saltar hacia atrás
                 }
                 let delta = match u16::try_from(new_target - (new_i + 1)) {
                     Ok(d) => d,
-                    Err(_) => return, // Desborda u16, abortar
+                    Err(_) => return false, // Desborda u16, abortar
                 };
                 OpCode::Jump(delta)
             }
             OpCode::JumpIfFalse(offset) => {
                 let old_target = old_i + 1 + offset as usize;
                 if old_target > old_len {
-                    return;
+                    return false;
                 }
                 let new_target = target_map[old_target];
                 if new_target <= new_i {
-                    return;
+                    return false;
                 }
                 let delta = match u16::try_from(new_target - (new_i + 1)) {
                     Ok(d) => d,
-                    Err(_) => return,
+                    Err(_) => return false,
                 };
                 OpCode::JumpIfFalse(delta)
             }
             OpCode::Loop(offset) => {
                 if (old_i + 1) < offset as usize {
-                    return; // Offset de loop inválido en chunk original, abortar compactación
+                    return false; // Offset de loop inválido en chunk original, abortar compactación
                 }
                 let old_target = (old_i + 1) - offset as usize;
                 if old_target > old_len {
-                    return;
+                    return false;
                 }
                 let new_target = target_map[old_target];
                 if new_target > new_i + 1 {
-                    return; // No puede saltar hacia adelante
+                    return false; // No puede saltar hacia adelante
                 }
                 let delta = match u16::try_from((new_i + 1) - new_target) {
                     Ok(d) => d,
-                    Err(_) => return,
+                    Err(_) => return false,
                 };
                 OpCode::Loop(delta)
             }
@@ -1158,4 +1170,5 @@ fn compact_chunk_jumps(chunk: &mut Chunk) {
     debug_assert_eq!(new_code.len(), new_lines.len());
     chunk.code = new_code;
     chunk.lines = new_lines;
+    true
 }
