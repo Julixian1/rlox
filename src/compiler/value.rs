@@ -6,6 +6,7 @@ use crate::vm_class::{BoundMethod, VmClass, VmInstance};
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
+use crate::compiler::reg::closure::{RegClosure, RegProto};
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -21,6 +22,8 @@ pub enum Value {
     VmClass(Rc<RefCell<VmClass>>),
     VmInstance(Rc<RefCell<VmInstance>>),
     BoundMethod(Rc<BoundMethod>),
+    RegProto(Rc<RegProto>),
+    RegClosure(Rc<RegClosure>),
 }
 
 impl PartialEq for Value {
@@ -38,6 +41,8 @@ impl PartialEq for Value {
             (Value::VmClass(a), Value::VmClass(b)) => Rc::ptr_eq(a, b),
             (Value::VmInstance(a), Value::VmInstance(b)) => Rc::ptr_eq(a, b),
             (Value::BoundMethod(a), Value::BoundMethod(b)) => Rc::ptr_eq(a, b),
+            (Value::RegProto(a), Value::RegProto(b)) => Rc::ptr_eq(a, b),
+            (Value::RegClosure(a), Value::RegClosure(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
@@ -72,6 +77,8 @@ impl fmt::Display for Value {
             Value::VmClass(klass) => write!(f, "{}", klass.borrow()),
             Value::VmInstance(instance) => write!(f, "{}", instance.borrow()),
             Value::BoundMethod(bound) => write!(f, "{}", bound),
+            Value::RegProto(proto) => write!(f, "{}", proto),
+            Value::RegClosure(closure) => write!(f, "{}", closure),
         }
     }
 }

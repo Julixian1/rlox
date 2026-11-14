@@ -5,6 +5,7 @@ pub mod function;
 pub mod value;
 pub mod vm;
 pub mod vm_class;
+pub mod reg;
 
 use crate::chunk::{Chunk, OpCode};
 use crate::closure::{FnProto, UpvalueDesc};

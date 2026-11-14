@@ -1,5 +1,6 @@
 use rlox::checker;
 use rlox::compiler;
+use rlox::compiler::reg::{codegen, vm::RegVm};
 use rlox::interpreter::Interpreter;
 use rlox::parser::Parser;
 use rlox::resolver::Resolver;
@@ -13,6 +14,7 @@ use std::io::{self, Write};
 enum Backend {
     TreeWalk(Interpreter),
     Bytecode(Vm<io::Stdout>),
+    Register(RegVm<io::Stdout>),
 }
 
 impl Backend {
@@ -37,6 +39,23 @@ impl Backend {
             Backend::Bytecode(vm) => {
                 let script = match compiler::compile(&statements) {
                     Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("Compile Error: {}", e);
+                        return;
+                    }
+                };
+
+                if env::var_os("RLOX_DISASSEMBLE").is_some() {
+                    eprint!("{}", script.chunk.disassemble("script"));
+                }
+
+                if let Err(e) = vm.interpret(script) {
+                    eprintln!("Runtime Error: {}", e);
+                }
+            }
+            Backend::Register(vm) => {
+                let script = match codegen::compile(&statements) {
+                    Ok(c) => c,
                     Err(e) => {
                         eprintln!("Compile Error: {}", e);
                         return;
@@ -86,16 +105,23 @@ fn parse_and_check(source: String) -> Option<Vec<Stmt>> {
 }
 
 fn main() {
-    let use_vm = env::args().skip(1).any(|a| a == "--vm");
-    let args: Vec<String> = env::args().filter(|a| a != "--vm").collect();
-    let mut backend = if use_vm {
+    let flags: Vec<String> = env::args().skip(1).collect();
+    let use_vm = flags.iter().any(|a| a == "--vm");
+    let use_reg = flags.iter().any(|a| a == "--reg");
+    let args: Vec<String> = env::args()
+        .filter(|a| a != "--vm" && a != "--reg")
+        .collect();
+
+    let mut backend = if use_reg {
+        Backend::Register(RegVm::new())
+    } else if use_vm {
         Backend::Bytecode(Vm::new())
     } else {
         Backend::TreeWalk(Interpreter::new())
     };
 
     if args.len() > 2 {
-        println!("Uso: rlox [--vm] [script]");
+        println!("Uso: rlox [--vm | --reg] [script]");
         std::process::exit(64);
     } else if args.len() == 2 {
         let source = fs::read_to_string(&args[1]).expect("No se puede leer el archivo.");
