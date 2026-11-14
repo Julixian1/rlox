@@ -1,0 +1,20 @@
+fun makeCounter() {
+  var c = 0;
+  fun inc() {
+    c = c + 1;
+    return c;
+  }
+  return inc;
+}
+
+fun main() {
+  var counter = makeCounter();
+  var i = 0;
+  while (i < 1000000) {
+    counter();
+    i = i + 1;
+  }
+  print counter();
+}
+main();
+

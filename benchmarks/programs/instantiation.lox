@@ -1,0 +1,18 @@
+class Item {
+  init(v) {
+    this.v = v;
+  }
+}
+
+fun main() {
+  var i = 0;
+  var sum = 0;
+  while (i < 300000) {
+    var item = Item(i);
+    sum = sum + item.v;
+    i = i + 1;
+  }
+  print sum;
+}
+main();
+

@@ -1,0 +1,15 @@
+fun add(a, b) {
+  return a + b;
+}
+
+fun main() {
+  var i = 0;
+  var acc = 0;
+  while (i < 1000000) {
+    acc = add(acc, i);
+    i = i + 1;
+  }
+  print acc;
+}
+main();
+

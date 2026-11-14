@@ -1,0 +1,23 @@
+class Box {
+  init() {
+    this.f1 = 0;
+    this.f2 = 0;
+    this.f3 = 0;
+    this.f4 = 0;
+  }
+}
+
+fun main() {
+  var b = Box();
+  var i = 0;
+  while (i < 500000) {
+    b.f1 = i;
+    b.f2 = b.f1 + 1;
+    b.f3 = b.f2 + 1;
+    b.f4 = b.f3 + 1;
+    i = i + 1;
+  }
+  print b.f1 + b.f2 + b.f3 + b.f4;
+}
+main();
+
