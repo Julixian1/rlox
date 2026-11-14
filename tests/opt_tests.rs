@@ -878,3 +878,325 @@ fn test_e4b_dce_closures_and_upvalues_soundness() {
         assert!(!has_jumps(&p1), "En O1 no deben quedar saltos de control para: {}", src);
     }
 }
+
+// =========================================================================
+// Tests E4.C: Jump Simplification
+// =========================================================================
+
+#[test]
+fn test_e4c_1_jump_zero_isolated() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    chunk.write(OpCode::Print, 1);
+    chunk.write(OpCode::Jump(0), 1);
+    chunk.write(OpCode::Return, 2);
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    assert_eq!(chunk.code, vec![OpCode::Print, OpCode::Return]);
+    assert_eq!(chunk.lines, vec![1, 2]);
+}
+
+#[test]
+fn test_e4c_2_multiple_consecutive_jump_zero() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    chunk.write(OpCode::Print, 1);
+    chunk.write(OpCode::Jump(0), 1);
+    chunk.write(OpCode::Jump(0), 1);
+    chunk.write(OpCode::Jump(0), 2);
+    chunk.write(OpCode::Return, 3);
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    assert_eq!(chunk.code, vec![OpCode::Print, OpCode::Return]);
+    assert_eq!(chunk.lines, vec![1, 3]);
+}
+
+#[test]
+fn test_e4c_3_jump_targeting_eliminated_instruction() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    chunk.write(OpCode::Jump(1), 1);
+    chunk.write(OpCode::Print, 2);
+    chunk.write(OpCode::Jump(0), 3);
+    chunk.write(OpCode::Return, 4);
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    assert_eq!(
+        chunk.code,
+        vec![OpCode::Jump(1), OpCode::Print, OpCode::Return]
+    );
+    assert_eq!(chunk.lines, vec![1, 2, 4]);
+}
+
+#[test]
+fn test_e4c_4_jump_targeting_end_of_chunk() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    chunk.write(OpCode::Jump(1), 1);
+    chunk.write(OpCode::Print, 2);
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    assert_eq!(chunk.code, vec![OpCode::Jump(1), OpCode::Print]);
+}
+
+#[test]
+fn test_e4c_5_jump_chain_longer_than_16() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    // 20 saltos Jump(1) intercalados con Print:
+    // Cada salto apunta al siguiente salto (0 -> 2 -> 4 -> ... -> 40).
+    for i in 0..20 {
+        chunk.write(OpCode::Jump(1), (i * 2 + 1) as usize);
+        chunk.write(OpCode::Print, (i * 2 + 2) as usize);
+    }
+    chunk.write(OpCode::Return, 41);
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    // Todos los saltos deben redirigirse directamente al Return final (índice 40).
+    // Para el índice 0: target = 40, offset = 40 - (0 + 1) = 39.
+    assert_eq!(chunk.code[0], OpCode::Jump(39));
+    // Para el índice 2: target = 40, offset = 40 - (2 + 1) = 37.
+    assert_eq!(chunk.code[2], OpCode::Jump(37));
+    assert_eq!(chunk.code[40], OpCode::Return);
+}
+
+#[test]
+fn test_e4c_6_cyclic_jump_chain() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    chunk.write(OpCode::Jump(1), 1);
+    chunk.write(OpCode::Print, 2);
+    chunk.write(OpCode::Return, 3);
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+    assert_eq!(chunk.code.len(), 3);
+}
+
+#[test]
+fn test_e4c_7_forward_and_backward_jumps() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    chunk.write(OpCode::Print, 1);
+    chunk.write(OpCode::Jump(0), 2);
+    chunk.write(OpCode::Loop(2), 3);
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    assert_eq!(chunk.code, vec![OpCode::Print, OpCode::Loop(1)]);
+    assert_eq!(chunk.lines, vec![1, 3]);
+}
+
+#[test]
+fn test_e4c_8_jump_if_false_with_intermediate_jump() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    chunk.write(OpCode::JumpIfFalse(1), 1);
+    chunk.write(OpCode::Print, 2);
+    chunk.write(OpCode::Jump(1), 3);
+    chunk.write(OpCode::Pop, 4);
+    chunk.write(OpCode::Return, 5);
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    assert_eq!(chunk.code[0], OpCode::JumpIfFalse(3));
+}
+
+#[test]
+fn test_e4c_9_nested_conditionals() {
+    let src = r#"
+        var x = 10;
+        var y = 20;
+        if (x > 5) {
+            if (y > 15) {
+                print "ambos";
+            } else {
+                print "solo x";
+            }
+        } else {
+            print "ninguno";
+        }
+    "#;
+
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let mut o0_jumps = OptConfig::from_level(OptLevel::O0);
+    o0_jumps.apply_flags("jumps", true).unwrap();
+
+    let (out_o0, _) = run_with_opt(src, o0);
+    let (out_jumps, _) = run_with_opt(src, o0_jumps);
+
+    assert_eq!(out_o0, "ambos\n");
+    assert_eq!(out_jumps, "ambos\n");
+}
+
+#[test]
+fn test_e4c_10_nested_loops() {
+    let src = r#"
+        var sum = 0;
+        var i = 0;
+        while (i < 3) {
+            var j = 0;
+            while (j < 3) {
+                sum = sum + 1;
+                j = j + 1;
+            }
+            i = i + 1;
+        }
+        print sum;
+    "#;
+
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let mut o0_jumps = OptConfig::from_level(OptLevel::O0);
+    o0_jumps.apply_flags("jumps", true).unwrap();
+
+    let (out_o0, _) = run_with_opt(src, o0);
+    let (out_jumps, _) = run_with_opt(src, o0_jumps);
+
+    assert_eq!(out_o0, "9\n");
+    assert_eq!(out_jumps, "9\n");
+}
+
+#[test]
+fn test_e4c_11_logical_operators_and_or() {
+    let src = r#"
+        print 1 and 2 and 3;
+        print false and "no";
+        print false or nil or "si";
+        print true or "no";
+    "#;
+
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let mut o0_jumps = OptConfig::from_level(OptLevel::O0);
+    o0_jumps.apply_flags("jumps", true).unwrap();
+
+    let (out_o0, _) = run_with_opt(src, o0);
+    let (out_jumps, _) = run_with_opt(src, o0_jumps);
+
+    assert_eq!(out_o0, "3\nfalse\nsi\ntrue\n");
+    assert_eq!(out_jumps, "3\nfalse\nsi\ntrue\n");
+}
+
+#[test]
+fn test_e4c_12_closures_and_upvalues() {
+    let src = r#"
+        fun make() {
+            var count = 0;
+            fun inc() {
+                count = count + 1;
+                return count;
+            }
+            return inc;
+        }
+        var c = make();
+        print c();
+        print c();
+    "#;
+
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let mut o0_jumps = OptConfig::from_level(OptLevel::O0);
+    o0_jumps.apply_flags("jumps", true).unwrap();
+
+    let (out_o0, _) = run_with_opt(src, o0);
+    let (out_jumps, _) = run_with_opt(src, o0_jumps);
+
+    assert_eq!(out_o0, "1\n2\n");
+    assert_eq!(out_jumps, "1\n2\n");
+}
+
+#[test]
+fn test_e4c_13_error_lines_preserved() {
+    let src = "var x = 10;\nif (x > 5) {\n    print 1 + \"hola\";\n}";
+
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    let mut o0_jumps = OptConfig::from_level(OptLevel::O0);
+    o0_jumps.apply_flags("jumps", true).unwrap();
+
+    let stmts = parse_and_check(src);
+    let p_o0 = compiler::compile_with_opt(&stmts, o0).unwrap();
+    let p_jumps = compiler::compile_with_opt(&stmts, o0_jumps).unwrap();
+
+    let mut out0 = Vec::new();
+    let err0 = Vm::with_output(&mut out0).interpret(p_o0).unwrap_err();
+
+    let mut out1 = Vec::new();
+    let err1 = Vm::with_output(&mut out1).interpret(p_jumps).unwrap_err();
+
+    assert_eq!(err0, err1);
+    assert!(err1.contains("[line 3]"));
+}
+
+#[test]
+fn test_e4c_14_optimization_flags() {
+    let o0 = OptConfig::from_level(OptLevel::O0);
+    assert!(!o0.jump_simplification);
+
+    let o1 = OptConfig::from_level(OptLevel::O1);
+    assert!(o1.jump_simplification);
+
+    let mut o0_jumps = OptConfig::from_level(OptLevel::O0);
+    o0_jumps.apply_flags("jumps", true).unwrap();
+    assert!(o0_jumps.jump_simplification);
+
+    let mut o1_no_jumps = OptConfig::from_level(OptLevel::O1);
+    o1_no_jumps.apply_flags("jumps", false).unwrap();
+    assert!(!o1_no_jumps.jump_simplification);
+}
+
+#[test]
+fn test_e4c_15_output_parity_comprehensive() {
+    let programs = [
+        "for (var i = 0; i < 5; i = i + 1) { print i; }",
+        "var x = 0; while (x < 4) { if (x == 2) print \"dos\"; else print x; x = x + 1; }",
+        "class A { foo(n) { if (n > 0) return this.foo(n - 1) + 1; return 0; } } print A().foo(3);",
+    ];
+
+    for src in programs {
+        let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+        let mut o0_jumps = OptConfig::from_level(OptLevel::O0);
+        o0_jumps.apply_flags("jumps", true).unwrap();
+        let (out_jumps, _) = run_with_opt(src, o0_jumps);
+        assert_eq!(out_o0, out_jumps, "Paridad para: {}", src);
+    }
+}
+
+#[test]
+fn test_e4c_16_loop_targeting_eliminated_jump_zero() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    chunk.write(OpCode::Nil, 1);     // 0
+    chunk.write(OpCode::Jump(0), 2); // 1 (eliminado)
+    chunk.write(OpCode::Print, 3);   // 2 -> nuevo 1
+    chunk.write(OpCode::Loop(3), 4); // 3 (apunta a 1: 4 - 3 = 1) -> nuevo 2
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    // En el chunk compactado:
+    // 0: Nil
+    // 1: Print
+    // 2: Loop(2) -> apunta a nuevo índice 1 (Print): (2 + 1) - 2 = 1.
+    assert_eq!(chunk.code, vec![OpCode::Nil, OpCode::Print, OpCode::Loop(2)]);
+    assert_eq!(chunk.lines, vec![1, 3, 4]);
+}
+
+#[test]
+fn test_e4c_17_multiple_jumps_targeting_same_eliminated_jump() {
+    let mut chunk = rlox::chunk::Chunk::new();
+    chunk.write(OpCode::Jump(2), 1);        // 0 -> apunta a 3 (0 + 1 + 2 = 3)
+    chunk.write(OpCode::JumpIfFalse(1), 1); // 1 -> apunta a 3 (1 + 1 + 1 = 3)
+    chunk.write(OpCode::Print, 2);          // 2 -> nuevo 2
+    chunk.write(OpCode::Jump(0), 3);        // 3 -> eliminado
+    chunk.write(OpCode::Return, 4);         // 4 -> nuevo 3
+
+    compiler::simplify_chunk_jumps(&mut chunk);
+
+    // En el chunk compactado:
+    // 0: Jump(2) -> nuevo target 3 (Return): offset = 3 - (0 + 1) = 2
+    // 1: JumpIfFalse(1) -> nuevo target 3 (Return): offset = 3 - (1 + 1) = 1
+    // 2: Print
+    // 3: Return
+    assert_eq!(
+        chunk.code,
+        vec![
+            OpCode::Jump(2),
+            OpCode::JumpIfFalse(1),
+            OpCode::Print,
+            OpCode::Return
+        ]
+    );
+    assert_eq!(chunk.lines, vec![1, 1, 2, 4]);
+}

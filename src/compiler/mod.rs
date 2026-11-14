@@ -14,6 +14,7 @@ use crate::expr::{Expr, ExprVisitor, LiteralValue};
 use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::{Token, TokenType};
 use crate::value::Value;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 pub use opt::{OptConfig, OptLevel, OptPass};
@@ -111,7 +112,10 @@ impl Compiler {
         self.compile_stmt_sequence(statements)?;
         self.emit(OpCode::Nil);
         self.emit(OpCode::Return);
-        let script = self.fns.pop().expect("falta el estado del script");
+        let mut script = self.fns.pop().expect("falta el estado del script");
+        if self.opt.jump_simplification {
+            simplify_chunk_jumps(&mut script.proto.chunk);
+        }
         Ok(Rc::new(script.proto))
     }
 
@@ -297,8 +301,11 @@ impl Compiler {
             self.emit(OpCode::Return);
         }
 
-        let state = self.fns.pop().expect("falta el estado de la función");
+        let mut state = self.fns.pop().expect("falta el estado de la función");
         self.line = name.line;
+        if self.opt.jump_simplification {
+            simplify_chunk_jumps(&mut state.proto.chunk);
+        }
         let k = self.make_constant(Value::Proto(Rc::new(state.proto)))?;
         self.emit(OpCode::Closure(k));
         Ok(())
@@ -951,4 +958,204 @@ impl StmtVisitor<CResult> for Compiler {
 
         Ok(())
     }
+}
+
+// ---- optimizaciones: jump simplification ---------------------------
+
+pub fn simplify_chunk_jumps(chunk: &mut Chunk) {
+    // 1. Compactar primero eliminando físicamente Jump(0).
+    // Esto remueve saltos nulos a la siguiente instrucción, redirige de forma
+    // segura cualquier salto que apuntaba a ellos hacia la siguiente instrucción viva,
+    // y evita que Jump(0) sea reescrito a saltos no nulos durante el threading.
+    compact_chunk_jumps(chunk);
+
+    // 2. Aplicar Jump Threading sobre el chunk compactado.
+    // Sigue cadenas de saltos incondicionales hasta su destino final
+    // y redirige JumpIfFalse cuyo destino inmediato sea un Jump incondicional.
+    jump_threading(chunk);
+
+    // 3. Pasada final de compactación defensiva por si alguna redirección expuso un nuevo Jump(0).
+    compact_chunk_jumps(chunk);
+}
+
+fn jump_threading(chunk: &mut Chunk) {
+    let len = chunk.code.len();
+    for i in 0..len {
+        match chunk.code[i] {
+            OpCode::Jump(offset) => {
+                let target = i + 1 + offset as usize;
+                if let Some(final_target) = resolve_jump_chain(chunk, i, target) {
+                    if final_target > i {
+                        if let Ok(new_offset) = u16::try_from(final_target - (i + 1)) {
+                            chunk.code[i] = OpCode::Jump(new_offset);
+                        }
+                    }
+                }
+            }
+            OpCode::JumpIfFalse(offset) => {
+                let target = i + 1 + offset as usize;
+                // Solo redirigir si el destino inmediato es un Jump incondicional
+                if target < len && matches!(chunk.code[target], OpCode::Jump(_)) {
+                    if let Some(final_target) = resolve_jump_chain(chunk, i, target) {
+                        if final_target > i {
+                            if let Ok(new_offset) = u16::try_from(final_target - (i + 1)) {
+                                chunk.code[i] = OpCode::JumpIfFalse(new_offset);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn resolve_jump_chain(chunk: &Chunk, origin: usize, mut curr_target: usize) -> Option<usize> {
+    let len = chunk.code.len();
+    let mut visited = HashSet::new();
+    visited.insert(origin);
+    visited.insert(curr_target);
+
+    let mut changed = false;
+
+    while curr_target < len {
+        if let OpCode::Jump(next_offset) = chunk.code[curr_target] {
+            let next_target = curr_target + 1 + next_offset as usize;
+            if next_target <= origin {
+                // No permitir convertir un salto hacia adelante en retroceso
+                break;
+            }
+            if visited.contains(&next_target) {
+                // Ciclo detectado: detenerse y mantener el último destino no cíclico
+                break;
+            }
+            visited.insert(next_target);
+            curr_target = next_target;
+            changed = true;
+        } else {
+            break;
+        }
+    }
+
+    if changed {
+        Some(curr_target)
+    } else {
+        None
+    }
+}
+
+fn compact_chunk_jumps(chunk: &mut Chunk) {
+    let old_len = chunk.code.len();
+    if old_len == 0 {
+        return;
+    }
+
+    // 1. Identificar instrucciones Jump(0) eliminables
+    let to_remove: Vec<bool> = chunk
+        .code
+        .iter()
+        .map(|op| matches!(op, OpCode::Jump(0)))
+        .collect();
+
+    if !to_remove.iter().any(|&b| b) {
+        return;
+    }
+
+    // 2. Construir mapa de supervivencia para instrucciones no eliminadas
+    let mut surviving_indices = Vec::with_capacity(old_len);
+    let mut new_len = 0;
+    for &remove in &to_remove {
+        if remove {
+            surviving_indices.push(None);
+        } else {
+            surviving_indices.push(Some(new_len));
+            new_len += 1;
+        }
+    }
+
+    // 3. Construir target_map para cualquier destino de 0..=old_len
+    let mut target_map = Vec::with_capacity(old_len + 1);
+    for idx in 0..=old_len {
+        let mut target = idx;
+        while target < old_len && to_remove[target] {
+            target += 1;
+        }
+        if target >= old_len {
+            target_map.push(new_len);
+        } else {
+            target_map.push(surviving_indices[target].expect("índice sobreviviente"));
+        }
+    }
+
+    // 4. Construir el nuevo chunk de manera temporal
+    let mut new_code = Vec::with_capacity(new_len);
+    let mut new_lines = Vec::with_capacity(new_len);
+
+    for old_i in 0..old_len {
+        if to_remove[old_i] {
+            continue;
+        }
+        let new_i = new_code.len();
+        let old_line = chunk.lines[old_i];
+        let op = chunk.code[old_i];
+
+        let new_op = match op {
+            OpCode::Jump(offset) => {
+                let old_target = old_i + 1 + offset as usize;
+                if old_target > old_len {
+                    return; // Offset inválido en chunk original, abortar compactación
+                }
+                let new_target = target_map[old_target];
+                if new_target <= new_i {
+                    return; // No puede saltar hacia atrás
+                }
+                let delta = match u16::try_from(new_target - (new_i + 1)) {
+                    Ok(d) => d,
+                    Err(_) => return, // Desborda u16, abortar
+                };
+                OpCode::Jump(delta)
+            }
+            OpCode::JumpIfFalse(offset) => {
+                let old_target = old_i + 1 + offset as usize;
+                if old_target > old_len {
+                    return;
+                }
+                let new_target = target_map[old_target];
+                if new_target <= new_i {
+                    return;
+                }
+                let delta = match u16::try_from(new_target - (new_i + 1)) {
+                    Ok(d) => d,
+                    Err(_) => return,
+                };
+                OpCode::JumpIfFalse(delta)
+            }
+            OpCode::Loop(offset) => {
+                if (old_i + 1) < offset as usize {
+                    return; // Offset de loop inválido en chunk original, abortar compactación
+                }
+                let old_target = (old_i + 1) - offset as usize;
+                if old_target > old_len {
+                    return;
+                }
+                let new_target = target_map[old_target];
+                if new_target > new_i + 1 {
+                    return; // No puede saltar hacia adelante
+                }
+                let delta = match u16::try_from((new_i + 1) - new_target) {
+                    Ok(d) => d,
+                    Err(_) => return,
+                };
+                OpCode::Loop(delta)
+            }
+            other => other,
+        };
+
+        new_code.push(new_op);
+        new_lines.push(old_line);
+    }
+
+    debug_assert_eq!(new_code.len(), new_lines.len());
+    chunk.code = new_code;
+    chunk.lines = new_lines;
 }
