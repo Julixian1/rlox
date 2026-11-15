@@ -54,8 +54,7 @@ partes:
   virtuales que lo ejecutan.
 
 Esta separación permite reutilizar el frontend en los distintos backends y
-evita mezclar el análisis del programa con su ejecución. También hizo posible
-agregar el compilador sin eliminar ni duplicar el intérprete que ya existía.
+evita mezclar el análisis del programa con su ejecución.
 
 La distribución es propia. No se copian los nombres ni la organización interna
 de `plox`; se siguen solamente los lineamientos generales del trabajo práctico.
@@ -129,7 +128,7 @@ costosas en la VM de pila.
 
 La VM de registros comparte el frontend, pero tiene su propio chunk, codegen,
 closures y runtime. Todavía no soporta todas las construcciones orientadas a
-objetos, por lo que algunos programas con clases pueden aparecer como
+objetos, por lo que programas con clases pueden aparecer como
 `unsupported`.
 
 Se ejecuta con:
@@ -232,7 +231,7 @@ En la implementación inicial del frontend, el análisis sintáctico de expresio
 
 Para la entrega final, se refactorizó el módulo en [`src/frontend/parser/pratt.rs`](src/frontend/parser/pratt.rs) adoptando el **algoritmo de Vaughan Pratt (*Pratt parsing*)** guiado por una tabla de reglas de precedencia y asociatividad. Esta idea se obtuvo por mencion del docente en clase.
 
-De esta manera la incorporación de nuevos operadores (como el operador ternario `?:`, módulo `%` o asignaciones compuestas) se reduce a agregar una entrada en la tabla de precedencias, sin alterar la estructura gramatical del parser. Alinea el frontend con el enfoque moderno guiado por precedencia propuesto en *Crafting Interpreters* para la etapa de bytecode.
+De esta manera la incorporación de nuevos operadores (como el operador ternario `?:`, módulo `%` o asignaciones compuestas) se reduce a agregar una entrada en la tabla de precedencias, sin alterar la estructura gramatical del parser. 
 
 ### 2. Separación de `checker` frente a `resolver` (análisis semántico modular)
 En la entrega parcial, los chequeos semánticos estáticos (como el rechazo de sentencias `return` fuera de funciones y la detección de declaraciones autorreferenciadas tipo `var a = a;`) se ejecutaban dentro del `Resolver`.
@@ -255,6 +254,17 @@ El parser transforma las construcciones de alto nivel como los bucles `for` en c
 * **Seguridad de memoria sin Garbage Collector:** Rust garantiza memory safety mediante las reglas de ownership y borrado determinista en tiempo de compilación (RAII), eliminando pausas de GC y asegurando un consumo mínimo de memoria RAM.
 * **Sistema de tipos expresivo y exhaustivo:** El uso de enumerados (`enum`) y pattern matching exhaustivo obliga al compilador a verificar que todas las variantes de tokens, expresiones, sentencias e instrucciones de bytecode estén contempladas, erradicando estados inválidos en tiempo de ejecución.
 * **Abstracciones de costo cero (*Zero-Cost Abstractions*):** Los patrones de diseño y los iteradores de Rust se compilan a código de máquina plano en modo `--release`, alcanzando un rendimiento cercano a C.
+
+### 6. Pila explícita de estados de función (`Vec<FnState>`) en lugar de árbol de compiladores
+En *Crafting Interpreters*, la compilación de funciones anidadas y closures se modela en C enlazando estructuras `Compiler` mediante punteros crudos (`struct Compiler* enclosing;`), formando una cadena o árbol de compiladores sobre la pila de llamadas del sistema.
+
+En Rust, reproducir esa estructura con referencias mutables enlazadas choca contra las reglas de pertenencia y tiempos de vida (*lifetimes*) del *borrow checker*. Por este motivo, en `rlox` ([`src/compiler/mod.rs`](src/compiler/mod.rs)) se adoptó un enfoque idiomático:
+
+* **Un único `Compiler` con una pila de estados (`Vec<FnState>`):** Toda la compilación es coordinada por una sola estructura que mantiene una pila dinámica de funciones en progreso.
+* **Apilado y desapilado al anidar funciones:** Al ingresar a compilar una función o closure, se apila un nuevo estado (`self.fns.push(FnState::new(...))`) con su propio `FnProto`, tabla de variables locales (`locals`) y profundidad de ámbito.
+* **Emisión sobre el tope:** Todas las operaciones de emisión de bytecode (`emit`, `add_constant`, etc.) operan sobre el tope de la pila (`self.fns.last_mut()`).
+* **Resolución limpia de *upvalues*:** Para resolver variables capturadas por cierres, el compilador inspecciona hacia atrás los elementos de la pila `self.fns` desde el tope hacia la base, encadenando upvalues de forma lineal sin requerir punteros complejos.
+* **Finalización:** Al concluir la función, se desapila con `self.fns.pop()`, se registra el prototipo resultante en la tabla de constantes de la función contenedora y se emite la instrucción `OP_CLOSURE`.
 
 
 ## Optimizaciones de la VM de pila
@@ -409,7 +419,7 @@ la carga del sistema, lo más importante para esta comparación son las
 relaciones entre backends, no los valores absolutos.
 
 Los programas con clases no se
-incluyen porque ese backend todavía no implementa esas construcciones.
+incluyen porque la vm de registros todavía no implementa esas construcciones.
 
 ## Resultados
 
@@ -756,6 +766,6 @@ print matriz[1][0]; // 3
 
 Para consultar programas completos utilizando listas (como algoritmos de ordenamiento in-place, pilas LIFO y operaciones sobre matrices bidimensionales), véase el directorio `examples/lists/`.
 
-Los tres grupos de funcionalidades adicionales están plenamente implementados y verificados en todos los backends del intérprete: Tree-Walk, Stack VM (en niveles `-O0`, `-O1` y `-O2`) y Register VM.
+Los tres grupos de funcionalidades adicionales están plenamente implementados y verificados en todos los backends.
 
 
