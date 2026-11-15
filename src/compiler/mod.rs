@@ -231,6 +231,28 @@ impl Compiler {
         Ok(())
     }
 
+    fn emit_compound_op(&mut self, operator: &Token) -> CResult {
+        match operator.token_type {
+            TokenType::PlusEqual => {
+                self.emit(OpCode::Add);
+            }
+            TokenType::MinusEqual => {
+                self.emit(OpCode::Subtract);
+            }
+            TokenType::StarEqual => {
+                self.emit(OpCode::Multiply);
+            }
+            TokenType::SlashEqual => {
+                self.emit(OpCode::Divide);
+            }
+            TokenType::PercentEqual => {
+                self.emit(OpCode::Modulo);
+            }
+            _ => return Err(self.error("Invalid compound operator.")),
+        }
+        Ok(())
+    }
+
     // ---- resolución de variables ---------------------------------------
 
     fn resolve_variable(&mut self, name: &str) -> Result<Var, String> {
@@ -783,6 +805,79 @@ impl ExprVisitor<CResult> for Compiler {
         // 4. Asignar el campo y dejar el valor en el stack
         self.line = name.line;
         let k = self.identifier_constant(&name.lexeme)?;
+        self.emit(OpCode::SetProperty(k));
+        Ok(())
+    }
+
+    fn visit_assign_modify_expr(
+        &mut self,
+        name: &Token,
+        operator: &Token,
+        value: &Expr,
+    ) -> CResult {
+        // 1. Obtener el valor actual de la variable
+        self.line = name.line;
+        let var = self.resolve_variable(&name.lexeme)?;
+        self.emit_get_var(&var, &name.lexeme)?;
+
+        // 2. Evaluar el lado derecho
+        value.accept(self)?;
+
+        // 3. Aplicar la operación binaria compuesta
+        self.line = operator.line;
+        self.emit_compound_op(operator)?;
+
+        // 4. Asignar el nuevo valor dejando el resultado en el stack
+        self.line = name.line;
+        match var {
+            Var::Local(slot) => {
+                self.emit(OpCode::SetLocal(slot));
+            }
+            Var::Upvalue(index) => {
+                self.emit(OpCode::SetUpvalue(index));
+            }
+            Var::Global => {
+                let k = self.identifier_constant(&name.lexeme)?;
+                if self.opt.indexed_globals {
+                    self.emit(OpCode::SetGlobalFast(k));
+                } else {
+                    self.emit(OpCode::SetGlobal(k));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn visit_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        name: &Token,
+        operator: &Token,
+        value: &Expr,
+    ) -> CResult {
+        // 1. Evaluar el objeto receptor exactamente una vez
+        object.accept(self)?;
+
+        // 2. Verificar que sea instancia antes de evaluar el valor o continuar
+        self.line = name.line;
+        self.emit(OpCode::CheckInstance);
+
+        // 3. Duplicar la referencia al objeto: stack [..., obj, obj]
+        self.emit(OpCode::Dup);
+
+        // 4. Obtener el valor actual de la propiedad: stack [..., obj, current_val]
+        let k = self.identifier_constant(&name.lexeme)?;
+        self.emit(OpCode::GetProperty(k));
+
+        // 5. Evaluar el lado derecho: stack [..., obj, current_val, rhs]
+        value.accept(self)?;
+
+        // 6. Aplicar la operación: stack [..., obj, new_val]
+        self.line = operator.line;
+        self.emit_compound_op(operator)?;
+
+        // 7. Asignar la propiedad dejando new_val en el stack: stack [..., new_val]
+        self.line = name.line;
         self.emit(OpCode::SetProperty(k));
         Ok(())
     }

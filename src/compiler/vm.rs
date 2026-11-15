@@ -219,6 +219,10 @@ impl<W: Write> Vm<W> {
                 OpCode::Pop => {
                     self.pop();
                 }
+                OpCode::Dup => {
+                    let value = self.peek().clone();
+                    self.stack.push(value);
+                }
 
                 // Los slots son relativos a la base del frame actual.
                 OpCode::GetLocal(slot) => {

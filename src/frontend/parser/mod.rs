@@ -396,33 +396,57 @@ impl Parser {
         self.assignment()
     }
  
-    /// Parsea expresiones de asignación (`var = expr`, `obj.prop = expr`).
+    /// Parsea expresiones de asignación (`var = expr`, `obj.prop = expr`, `var += expr`, etc.).
     fn assignment(&mut self) -> Result<Expr, String> {
         let expr = self.parse_precedence(Precedence::Or)?;
- 
-        if self.match_token(&[TokenType::Equal]) {
+
+        if self.match_token(&[
+            TokenType::Equal,
+            TokenType::PlusEqual,
+            TokenType::MinusEqual,
+            TokenType::StarEqual,
+            TokenType::SlashEqual,
+            TokenType::PercentEqual,
+        ]) {
+            let operator = self.previous().clone();
             let value = self.assignment()?;
- 
-            if let Expr::Variable { name } = expr {
-                return Ok(Expr::Assign {
-                    name,
-                    value: Box::new(value),
-                });
-            } else if let Expr::Get { object, name } = expr {
-                return Ok(Expr::Set {
-                    object,
-                    name,
-                    value: Box::new(value),
-                });
+
+            if operator.token_type == TokenType::Equal {
+                if let Expr::Variable { name } = expr {
+                    return Ok(Expr::Assign {
+                        name,
+                        value: Box::new(value),
+                    });
+                } else if let Expr::Get { object, name } = expr {
+                    return Ok(Expr::Set {
+                        object,
+                        name,
+                        value: Box::new(value),
+                    });
+                }
+            } else {
+                if let Expr::Variable { name } = expr {
+                    return Ok(Expr::AssignModify {
+                        name,
+                        operator,
+                        value: Box::new(value),
+                    });
+                } else if let Expr::Get { object, name } = expr {
+                    return Ok(Expr::SetModify {
+                        object,
+                        name,
+                        operator,
+                        value: Box::new(value),
+                    });
+                }
             }
- 
-            let equals = self.previous().clone();
+
             return Err(format!(
-                "[line {}] Error at '=': Invalid assignment target.",
-                equals.line
+                "[line {}] Error at '{}': Invalid assignment target.",
+                operator.line, operator.lexeme
             ));
         }
- 
+
         Ok(expr)
     }
  

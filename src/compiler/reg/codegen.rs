@@ -403,6 +403,22 @@ impl RegCompiler {
                 return Ok(());
             }
         }
+        if let Expr::AssignModify {
+            name,
+            operator,
+            value,
+        } = e
+        {
+            if let Some(reg) = self.resolve_local(&name.lexeme) {
+                let var_expr = Expr::Variable { name: name.clone() };
+                let l = self.operand_before(&var_expr, Some(value))?;
+                let rhs = self.operand(value)?;
+                self.line = operator.line;
+                self.compound_binary_op(operator, reg, l, rhs)?;
+                self.st.free_reg = saved;
+                return Ok(());
+            }
+        }
         let t = self.alloc_reg()?;
         self.expr(e, t)?;
         self.st.free_reg = saved;
@@ -430,14 +446,14 @@ impl RegCompiler {
 
     fn may_assign(e: &Expr) -> bool {
         match e {
-            Expr::Assign { .. } | Expr::Call { .. } => true,
+            Expr::Assign { .. } | Expr::AssignModify { .. } | Expr::Call { .. } => true,
             Expr::Unary { right, .. } => Self::may_assign(right),
             Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
                 Self::may_assign(left) || Self::may_assign(right)
             }
             Expr::Grouping { expression } => Self::may_assign(expression),
             Expr::Get { object, .. } => Self::may_assign(object),
-            Expr::Set { .. } => true,
+            Expr::Set { .. } | Expr::SetModify { .. } => true,
             Expr::Literal { .. }
             | Expr::Variable { .. }
             | Expr::This { .. }
@@ -512,6 +528,58 @@ impl RegCompiler {
                                 self.emit(RegOp::SetGlobal(k, dst));
                             }
                         }
+                    }
+                }
+                Ok(())
+            }
+
+            Expr::AssignModify {
+                name,
+                operator,
+                value,
+            } => {
+                match self.resolve_local(&name.lexeme) {
+                    Some(r) => {
+                        let saved = self.st.free_reg;
+                        let var_expr = Expr::Variable { name: name.clone() };
+                        let l = self.operand_before(&var_expr, Some(value))?;
+                        let rhs = self.operand(value)?;
+                        self.line = operator.line;
+                        self.compound_binary_op(operator, r, l, rhs)?;
+                        self.st.free_reg = saved;
+                        if r != dst {
+                            self.line = name.line;
+                            self.emit(RegOp::Move(dst, r));
+                        }
+                    }
+                    None => {
+                        self.line = name.line;
+                        let saved = self.st.free_reg;
+                        let work = self.alloc_reg()?;
+                        match self.resolve_upvalue(&name.lexeme) {
+                            Some(i) => {
+                                self.emit(RegOp::GetUpvalue(work, i));
+                                let rhs = self.operand(value)?;
+                                self.line = operator.line;
+                                self.compound_binary_op(operator, work, work, rhs)?;
+                                self.line = name.line;
+                                self.emit(RegOp::SetUpvalue(i, work));
+                            }
+                            None => {
+                                let k = self.identifier_constant(&name.lexeme)?;
+                                self.emit(RegOp::GetGlobal(work, k));
+                                let rhs = self.operand(value)?;
+                                self.line = operator.line;
+                                self.compound_binary_op(operator, work, work, rhs)?;
+                                self.line = name.line;
+                                self.emit(RegOp::SetGlobal(k, work));
+                            }
+                        }
+                        if work != dst {
+                            self.line = name.line;
+                            self.emit(RegOp::Move(dst, work));
+                        }
+                        self.st.free_reg = saved;
                     }
                 }
                 Ok(())
@@ -606,7 +674,9 @@ impl RegCompiler {
                 Ok(())
             }
 
-            Expr::Get { name, .. } | Expr::Set { name, .. } => {
+            Expr::Get { name, .. }
+            | Expr::Set { name, .. }
+            | Expr::SetModify { name, .. } => {
                 self.line = name.line;
                 Err(self.error("Properties are not supported yet in the register backend."))
             }
@@ -616,6 +686,33 @@ impl RegCompiler {
                 Err(self.error("'this' and 'super' are not supported yet in the register backend."))
             }
         }
+    }
+
+    fn compound_binary_op(&mut self, operator: &Token, d: u8, l: u8, r: u8) -> CResult {
+        match operator.token_type {
+            TokenType::PlusEqual => {
+                self.emit(RegOp::Add(d, l, r));
+            }
+            TokenType::MinusEqual => {
+                self.emit(RegOp::Sub(d, l, r));
+            }
+            TokenType::StarEqual => {
+                self.emit(RegOp::Mul(d, l, r));
+            }
+            TokenType::SlashEqual => {
+                self.emit(RegOp::Div(d, l, r));
+            }
+            TokenType::PercentEqual => {
+                self.emit(RegOp::Mod(d, l, r));
+            }
+            _ => {
+                return Err(self.error(&format!(
+                    "Unexpected compound operator '{}'.",
+                    operator.lexeme
+                )));
+            }
+        }
+        Ok(())
     }
 
     fn binary_op(&mut self, operator: &Token, d: u8, l: u8, r: u8) -> CResult {

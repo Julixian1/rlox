@@ -190,6 +190,22 @@ impl DeclarationCheck {
                 }
             }
             Expr::Assign { value, .. } => self.check_expr(value),
+            Expr::AssignModify { name, value, .. } => {
+                let uninitialized = self
+                    .scopes
+                    .last()
+                    .is_some_and(|scope| scope.get(&name.lexeme) == Some(&false));
+                if uninitialized {
+                    self.findings.push((
+                        name.line,
+                        format!(
+                            "[line {}] Error at '{}': Can't read local variable in its own initializer.",
+                            name.line, name.lexeme
+                        ),
+                    ));
+                }
+                self.check_expr(value);
+            }
             Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
                 self.check_expr(left);
                 self.check_expr(right);
@@ -206,7 +222,7 @@ impl DeclarationCheck {
             Expr::Unary { right, .. } => self.check_expr(right),
             Expr::Literal { .. } => {}
             Expr::Get { object, .. } => self.check_expr(object),
-            Expr::Set { object, value, .. } => {
+            Expr::Set { object, value, .. } | Expr::SetModify { object, value, .. } => {
                 self.check_expr(object);
                 self.check_expr(value);
             }

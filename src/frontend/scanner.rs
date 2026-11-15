@@ -97,17 +97,59 @@ impl Scanner {
             '}' => self.add_token(TokenType::RightBrace, None),
             ',' => self.add_token(TokenType::Comma, None),
             '.' => self.add_token(TokenType::Dot, None),
-            '-' => self.add_token(TokenType::Minus, None),
-            '+' => self.add_token(TokenType::Plus, None),
+            '-' => {
+                let matches = self.match_char('=');
+                self.add_token(
+                    if matches {
+                        TokenType::MinusEqual
+                    } else {
+                        TokenType::Minus
+                    },
+                    None,
+                );
+            }
+            '+' => {
+                let matches = self.match_char('=');
+                self.add_token(
+                    if matches {
+                        TokenType::PlusEqual
+                    } else {
+                        TokenType::Plus
+                    },
+                    None,
+                );
+            }
             ';' => self.add_token(TokenType::Semicolon, None),
-            '*' => self.add_token(TokenType::Star, None),
-            '%' => self.add_token(TokenType::Percent, None),
+            '*' => {
+                let matches = self.match_char('=');
+                self.add_token(
+                    if matches {
+                        TokenType::StarEqual
+                    } else {
+                        TokenType::Star
+                    },
+                    None,
+                );
+            }
+            '%' => {
+                let matches = self.match_char('=');
+                self.add_token(
+                    if matches {
+                        TokenType::PercentEqual
+                    } else {
+                        TokenType::Percent
+                    },
+                    None,
+                );
+            }
 
             '/' => {
                 if self.match_char('/') {
                     while self.peek() != '\n' && !self.is_at_end() {
                         self.advance();
                     }
+                } else if self.match_char('=') {
+                    self.add_token(TokenType::SlashEqual, None);
                 } else {
                     self.add_token(TokenType::Slash, None);
                 }

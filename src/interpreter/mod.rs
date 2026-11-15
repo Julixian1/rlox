@@ -86,6 +86,27 @@ impl Interpreter {
                 }
                 Ok(val)
             }
+            Expr::AssignModify {
+                name,
+                operator,
+                value,
+            } => {
+                let current = self.lookup_variable(ptr, name)?;
+                let rhs = self.evaluate(value)?;
+                let new_val = self.apply_compound_op(operator, current, rhs)?;
+                if let Some(&depth) = self.locals.get(&ptr) {
+                    self.environment
+                        .borrow_mut()
+                        .assign_at(depth, &name.lexeme, new_val.clone())
+                        .map_err(ReturnSignal::Error)?;
+                } else {
+                    self.environment
+                        .borrow_mut()
+                        .assign(name, new_val.clone())
+                        .map_err(ReturnSignal::Error)?;
+                }
+                Ok(new_val)
+            }
             _ => expr.accept(self),
         }
     }
@@ -153,6 +174,41 @@ impl Interpreter {
             _ => Err(ReturnSignal::Error(format!(
                 "[line {}] Operands must be numbers.",
                 line
+            ))),
+        }
+    }
+
+    /// Auxiliar para aplicar operadores de asignación compuesta (+=, -=, *=, /=, %=).
+    fn apply_compound_op(
+        &self,
+        operator: &Token,
+        left: Value,
+        right: Value,
+    ) -> Result<Value, ReturnSignal> {
+        match operator.token_type {
+            TokenType::PlusEqual => match (left, right) {
+                (Value::Number(l), Value::Number(r)) => Ok(Value::Number(l + r)),
+                (Value::String(l), Value::String(r)) => Ok(Value::String(format!("{}{}", l, r))),
+                _ => Err(ReturnSignal::Error(format!(
+                    "[line {}] Operands must be two numbers or two strings.",
+                    operator.line
+                ))),
+            },
+            TokenType::MinusEqual => {
+                self.num_binary_op(left, right, operator.line, |a, b| a - b)
+            }
+            TokenType::StarEqual => {
+                self.num_binary_op(left, right, operator.line, |a, b| a * b)
+            }
+            TokenType::SlashEqual => {
+                self.num_binary_op(left, right, operator.line, |a, b| a / b)
+            }
+            TokenType::PercentEqual => {
+                self.num_binary_op(left, right, operator.line, |a, b| a % b)
+            }
+            _ => Err(ReturnSignal::Error(format!(
+                "[line {}] Invalid compound assignment operator.",
+                operator.line
             ))),
         }
     }
@@ -511,6 +567,42 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             let val = self.evaluate(value)?;
             instance.borrow_mut().set(name.lexeme.clone(), val.clone());
             Ok(val)
+        } else {
+            Err(ReturnSignal::Error(format!(
+                "[line {}] Only instances have fields.",
+                name.line
+            )))
+        }
+    }
+
+    fn visit_assign_modify_expr(
+        &mut self,
+        _name: &Token,
+        _operator: &Token,
+        _value: &Expr,
+    ) -> Result<Value, ReturnSignal> {
+        unreachable!("AssignModify is handled directly in evaluate");
+    }
+
+    fn visit_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        name: &Token,
+        operator: &Token,
+        value: &Expr,
+    ) -> Result<Value, ReturnSignal> {
+        let object_val = self.evaluate(object)?;
+        if let Value::Instance(instance) = object_val {
+            let current = LoxInstance::get(&instance, &name.lexeme).ok_or_else(|| {
+                ReturnSignal::Error(format!(
+                    "[line {}] Undefined property '{}'.",
+                    name.line, name.lexeme
+                ))
+            })?;
+            let rhs = self.evaluate(value)?;
+            let new_val = self.apply_compound_op(operator, current, rhs)?;
+            instance.borrow_mut().set(name.lexeme.clone(), new_val.clone());
+            Ok(new_val)
         } else {
             Err(ReturnSignal::Error(format!(
                 "[line {}] Only instances have fields.",

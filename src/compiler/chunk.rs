@@ -11,6 +11,7 @@ pub enum OpCode {
 
     // Stack
     Pop,
+    Dup,
 
     // Variables
     GetLocal(u16),
@@ -224,6 +225,7 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::True => "OP_TRUE",
         OpCode::False => "OP_FALSE",
         OpCode::Pop => "OP_POP",
+        OpCode::Dup => "OP_DUP",
         OpCode::GetLocal(_) => "OP_GET_LOCAL",
         OpCode::SetLocal(_) => "OP_SET_LOCAL",
         OpCode::SetLocalPop(_) => "OP_SET_LOCAL_POP",

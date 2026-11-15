@@ -79,6 +79,10 @@ impl Resolver {
                 self.resolve_expr(value);
                 self.resolve_local(ptr, name);
             }
+            Expr::AssignModify { name, value, .. } => {
+                self.resolve_expr(value);
+                self.resolve_local(ptr, name);
+            }
             Expr::Binary { left, right, .. } => {
                 self.resolve_expr(left);
                 self.resolve_expr(right);
@@ -105,7 +109,7 @@ impl Resolver {
             Expr::Get { object, .. } => {
                 self.resolve_expr(object);
             }
-            Expr::Set { object, value, .. } => {
+            Expr::Set { object, value, .. } | Expr::SetModify { object, value, .. } => {
                 self.resolve_expr(value);
                 self.resolve_expr(object);
             }
@@ -226,6 +230,9 @@ impl ExprVisitor<()> for Resolver {
     fn visit_assign_expr(&mut self, _name: &Token, value: &Expr) {
         self.resolve_expr(value);
     }
+    fn visit_assign_modify_expr(&mut self, _name: &Token, _operator: &Token, value: &Expr) {
+        self.resolve_expr(value);
+    }
     fn visit_logical_expr(&mut self, left: &Expr, _operator: &Token, right: &Expr) {
         self.resolve_expr(left);
         self.resolve_expr(right);
@@ -242,6 +249,17 @@ impl ExprVisitor<()> for Resolver {
     }
 
     fn visit_set_expr(&mut self, object: &Expr, _name: &Token, value: &Expr) {
+        self.resolve_expr(value);
+        self.resolve_expr(object);
+    }
+
+    fn visit_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        _name: &Token,
+        _operator: &Token,
+        value: &Expr,
+    ) {
         self.resolve_expr(value);
         self.resolve_expr(object);
     }

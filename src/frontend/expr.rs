@@ -15,6 +15,8 @@ pub trait ExprVisitor<R> {
     fn visit_variable_expr(&mut self, name: &Token) -> R;
     /// Procesa una asignación de variable (`x = expr`).
     fn visit_assign_expr(&mut self, name: &Token, value: &Expr) -> R;
+    /// Procesa una asignación compuesta de variable (`x += expr`, etc.).
+    fn visit_assign_modify_expr(&mut self, name: &Token, operator: &Token, value: &Expr) -> R;
     /// Procesa una expresión lógica de cortocircuito (`or`, `and`).
     fn visit_logical_expr(&mut self, left: &Expr, operator: &Token, right: &Expr) -> R;
     /// Procesa una llamada a función (`fun_name(arg1, arg2)`).
@@ -23,6 +25,14 @@ pub trait ExprVisitor<R> {
     fn visit_get_expr(&mut self, object: &Expr, name: &Token) -> R;
     /// Procesa la asignación a una propiedad (`object.name = value`).
     fn visit_set_expr(&mut self, object: &Expr, name: &Token, value: &Expr) -> R;
+    /// Procesa una asignación compuesta a una propiedad (`object.name += value`, etc.).
+    fn visit_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        name: &Token,
+        operator: &Token,
+        value: &Expr,
+    ) -> R;
     /// Procesa la expresión `this`.
     fn visit_this_expr(&mut self, expr: &Expr, keyword: &Token) -> R;
     /// Procesa el acceso a método de superclase (`super.method`).
@@ -75,6 +85,11 @@ pub enum Expr {
         name: Token,
         value: Box<Expr>,
     },
+    AssignModify {
+        name: Token,
+        operator: Token,
+        value: Box<Expr>,
+    },
     Logical {
         left: Box<Expr>,
         operator: Token,
@@ -92,6 +107,12 @@ pub enum Expr {
     Set {
         object: Box<Expr>,
         name: Token,
+        value: Box<Expr>,
+    },
+    SetModify {
+        object: Box<Expr>,
+        name: Token,
+        operator: Token,
         value: Box<Expr>,
     },
     This {
@@ -117,6 +138,11 @@ impl Expr {
             Expr::Grouping { expression } => visitor.visit_grouping_expr(expression),
             Expr::Variable { name } => visitor.visit_variable_expr(name),
             Expr::Assign { name, value } => visitor.visit_assign_expr(name, value),
+            Expr::AssignModify {
+                name,
+                operator,
+                value,
+            } => visitor.visit_assign_modify_expr(name, operator, value),
             Expr::Logical {
                 left,
                 operator,
@@ -133,6 +159,12 @@ impl Expr {
                 name,
                 value,
             } => visitor.visit_set_expr(object, name, value),
+            Expr::SetModify {
+                object,
+                name,
+                operator,
+                value,
+            } => visitor.visit_set_modify_expr(object, name, operator, value),
             Expr::This { keyword } => visitor.visit_this_expr(self, keyword),
             Expr::Super { keyword, method } => visitor.visit_super_expr(self, keyword, method),
         }
@@ -161,6 +193,13 @@ impl fmt::Display for Expr {
             Expr::Assign { name, value } => {
                 write!(f, "(= {} {})", name.lexeme, value)
             }
+            Expr::AssignModify {
+                name,
+                operator,
+                value,
+            } => {
+                write!(f, "({} {} {})", operator.lexeme, name.lexeme, value)
+            }
             Expr::Logical {
                 left,
                 operator,
@@ -186,6 +225,14 @@ impl fmt::Display for Expr {
                 value,
             } => {
                 write!(f, "(= (. {} {}) {})", object, name.lexeme, value)
+            }
+            Expr::SetModify {
+                object,
+                name,
+                operator,
+                value,
+            } => {
+                write!(f, "({} (. {} {}) {})", operator.lexeme, object, name.lexeme, value)
             }
             Expr::This { .. } => write!(f, "this"),
             Expr::Super { method, .. } => write!(f, "(super {})", method.lexeme),
