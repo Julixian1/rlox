@@ -15,6 +15,7 @@ pub enum OpCode {
     // Variables
     GetLocal(u16),
     SetLocal(u16),
+    SetLocalPop(u16),
     GetGlobal(u16),
     DefineGlobal(u16),
     SetGlobal(u16),
@@ -169,6 +170,7 @@ impl Chunk {
             }
             OpCode::GetLocal(s)
             | OpCode::SetLocal(s)
+            | OpCode::SetLocalPop(s)
             | OpCode::GetUpvalue(s)
             | OpCode::SetUpvalue(s) => format!("{:<14} {:4}", name_of(&op), s),
             OpCode::Closure(i) => {
@@ -224,6 +226,7 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::Pop => "OP_POP",
         OpCode::GetLocal(_) => "OP_GET_LOCAL",
         OpCode::SetLocal(_) => "OP_SET_LOCAL",
+        OpCode::SetLocalPop(_) => "OP_SET_LOCAL_POP",
         OpCode::GetGlobal(_) => "OP_GET_GLOBAL",
         OpCode::DefineGlobal(_) => "OP_DEFINE_GLOBAL",
         OpCode::SetGlobal(_) => "OP_SET_GLOBAL",

@@ -229,6 +229,10 @@ impl<W: Write> Vm<W> {
                     let value = self.peek().clone();
                     self.stack[base + slot as usize] = value;
                 }
+                OpCode::SetLocalPop(slot) => {
+                    let value = self.pop();
+                    self.stack[base + slot as usize] = value;
+                }
                 OpCode::DefineGlobal(k) => {
                     let value = self.pop();
                     let name = Self::name_at(chunk, k);

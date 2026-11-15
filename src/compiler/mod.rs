@@ -512,6 +512,13 @@ fn extract_literal(expr: &Expr) -> Option<Value> {
     }
 }
 
+fn unwrap_grouping(expr: &Expr) -> &Expr {
+    match expr {
+        Expr::Grouping { expression } => unwrap_grouping(expression),
+        _ => expr,
+    }
+}
+
 impl ExprVisitor<CResult> for Compiler {
     fn visit_literal_expr(&mut self, value: &LiteralValue) -> CResult {
         match value {
@@ -811,6 +818,17 @@ impl ExprVisitor<CResult> for Compiler {
 
 impl StmtVisitor<CResult> for Compiler {
     fn visit_expression_stmt(&mut self, expression: &Expr) -> CResult {
+        if self.opt.superinstructions {
+            if let Expr::Assign { name, value } = unwrap_grouping(expression) {
+                if let Some(slot) = self.state().resolve_local(&name.lexeme) {
+                    value.accept(self)?;
+                    self.line = name.line;
+                    self.emit(OpCode::SetLocalPop(slot as u16));
+                    return Ok(());
+                }
+            }
+        }
+
         expression.accept(self)?;
         self.emit(OpCode::Pop);
         Ok(())

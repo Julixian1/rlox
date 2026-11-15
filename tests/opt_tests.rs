@@ -2872,3 +2872,217 @@ fn test_f1_runtime_error_non_instance_receiver() {
         assert_eq!(err_o2, "[line 1] Only instances have fields.");
     }
 }
+
+// ============================================================================
+// F2 — SetLocalPop Optimization
+// ============================================================================
+
+#[test]
+fn test_f2_bytecode_emission_and_flags() {
+    let src = r#"
+        {
+            var a = 1;
+            a = 10;
+        }
+    "#;
+    let stmts = parse_and_check(src);
+
+    // 1. -O0: SetLocal + Pop, NO SetLocalPop
+    let opt_o0 = OptConfig::from_level(OptLevel::O0);
+    let proto_o0 = compiler::compile_with_opt(&stmts, opt_o0).unwrap();
+    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::SetLocal(_))));
+    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::Pop)));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::SetLocalPop(_))));
+
+    // 2. -O0 --opt=super: SetLocalPop activo
+    let mut opt_super = OptConfig::from_level(OptLevel::O0);
+    opt_super.apply_flags("super", true).unwrap();
+    let proto_super = compiler::compile_with_opt(&stmts, opt_super).unwrap();
+    assert!(find_opcode(&proto_super, &|op| matches!(op, OpCode::SetLocalPop(_))));
+
+    // 3. -O2: SetLocalPop activo por defecto
+    let opt_o2 = OptConfig::from_level(OptLevel::O2);
+    let proto_o2 = compiler::compile_with_opt(&stmts, opt_o2).unwrap();
+    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::SetLocalPop(_))));
+
+    // 4. -O2 --no-opt=super: SetLocalPop desactivado
+    let mut opt_o2_no_super = OptConfig::from_level(OptLevel::O2);
+    opt_o2_no_super.apply_flags("super", false).unwrap();
+    let proto_o2_no_super = compiler::compile_with_opt(&stmts, opt_o2_no_super).unwrap();
+    assert!(!find_opcode(&proto_o2_no_super, &|op| matches!(op, OpCode::SetLocalPop(_))));
+    assert!(find_opcode(&proto_o2_no_super, &|op| matches!(op, OpCode::SetLocal(_))));
+}
+
+#[test]
+fn test_f2_chained_and_used_assignments() {
+    let src = r#"
+        {
+            var a = 1;
+            var b = 2;
+            a = b = 42;
+            print a;
+            print b;
+            print (a = 100);
+            print a;
+        }
+    "#;
+    let stmts = parse_and_check(src);
+    let opt_o2 = OptConfig::from_level(OptLevel::O2);
+    let proto_o2 = compiler::compile_with_opt(&stmts, opt_o2).unwrap();
+
+    // En a = b = 42:
+    // b = 42 debe usar SetLocal (porque su resultado lo consume a = ...)
+    // a = ... debe usar SetLocalPop (porque es la raíz de la sentencia)
+    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::SetLocalPop(_))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::SetLocal(_))));
+
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "42\n42\n100\n100\n");
+    assert_eq!(out_o2, "42\n42\n100\n100\n");
+}
+
+#[test]
+fn test_f2_grouped_and_loops() {
+    let src = r#"
+        {
+            var i = 0;
+            (i = 10);
+            print i;
+            while (i < 15) {
+                i = i + 1;
+            }
+            print i;
+        }
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "10\n15\n");
+    assert_eq!(out_o2, "10\n15\n");
+}
+
+#[test]
+fn test_f2_closures_capturing_locals() {
+    let src = r#"
+        fun make() {
+            var x = 10;
+            fun inc() {
+                x = x + 1;
+            }
+            fun get() {
+                return x;
+            }
+            inc();
+            inc();
+            return get();
+        }
+        print make();
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "12\n");
+    assert_eq!(out_o2, "12\n");
+}
+
+#[test]
+fn test_f2_stack_balance_deep_iterations() {
+    let src = r#"
+        {
+            var i = 0;
+            var acc = 0;
+            while (i < 100000) {
+                acc = acc + 1;
+                i = i + 1;
+            }
+            print acc;
+        }
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "100000\n");
+    assert_eq!(out_o2, "100000\n");
+}
+
+#[test]
+fn test_f2_error_evaluation_order_and_line() {
+    let src = "{\nvar a = 1;\na = undefined_global;\n}";
+    let stmts = parse_and_check(src);
+    let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
+
+    let mut vm_o0 = Vm::with_output(Vec::new());
+    let err_o0 = vm_o0.interpret(proto_o0).unwrap_err();
+    let mut vm_o2 = Vm::with_output(Vec::new());
+    let err_o2 = vm_o2.interpret(proto_o2).unwrap_err();
+
+    assert_eq!(err_o0, "[line 3] Error: Undefined variable 'undefined_global'.");
+    assert_eq!(err_o2, "[line 3] Error: Undefined variable 'undefined_global'.");
+}
+
+#[test]
+fn test_f2_audit_uninitialized_and_nested_scopes() {
+    // 1. Asignaciones en inicializadores: x = 1 intenta escribir a global x (que no existe)
+    let cases_err = [
+        "{ var x = (x = 1); }",
+        "{ var x = ((x = 1)); }",
+    ];
+    for src in cases_err {
+        let stmts = parse_and_check(src);
+        let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+        let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
+        let mut opt_no_super = OptConfig::from_level(OptLevel::O2);
+        opt_no_super.apply_flags("super", false).unwrap();
+        let proto_no_super = compiler::compile_with_opt(&stmts, opt_no_super).unwrap();
+
+        for proto in [proto_o0, proto_o2, proto_no_super] {
+            let mut vm = Vm::with_output(Vec::new());
+            let err = vm.interpret(proto).unwrap_err();
+            assert_eq!(err, "[line 1] Error: Undefined variable 'x'.");
+        }
+    }
+
+    // 2. Sombreo de variables locales en bloques anidados
+    let src_shadow = r#"
+        {
+            var a = 1;
+            {
+                var a = 2;
+                a = 3;
+                print a;
+            }
+            print a;
+        }
+    "#;
+    let (out_o0, _) = run_with_opt(src_shadow, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src_shadow, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "3\n1\n");
+    assert_eq!(out_o2, "3\n1\n");
+
+    // 3. Auto-asignación anidada: a = (a = 1)
+    let src_self_assign = r#"
+        {
+            var a;
+            a = (a = 1);
+            print a;
+        }
+    "#;
+    let (out_o0, _) = run_with_opt(src_self_assign, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src_self_assign, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "1\n");
+    assert_eq!(out_o2, "1\n");
+
+    // 4. Recursión y aislamiento de frames
+    let src_rec = r#"
+        fun countdown(n) {
+            var step = 1;
+            if (n <= 0) return 0;
+            step = 10;
+            return step + countdown(n - 1);
+        }
+        print countdown(5);
+    "#;
+    let (out_o0, _) = run_with_opt(src_rec, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src_rec, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "50\n");
+    assert_eq!(out_o2, "50\n");
+}
