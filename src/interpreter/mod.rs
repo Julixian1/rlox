@@ -681,4 +681,18 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
         // 4. Ligar a la instancia receptora
         Ok(Value::Function(Rc::new(method_fn.bind(instance))))
     }
+
+    fn visit_ternary_expr(
+        &mut self,
+        condition: &Expr,
+        then_branch: &Expr,
+        else_branch: &Expr,
+    ) -> Result<Value, ReturnSignal> {
+        let cond_val = self.evaluate(condition)?;
+        if cond_val.is_truthy() {
+            self.evaluate(then_branch)
+        } else {
+            self.evaluate(else_branch)
+        }
+    }
 }

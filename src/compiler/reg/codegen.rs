@@ -451,6 +451,15 @@ impl RegCompiler {
             Expr::Binary { left, right, .. } | Expr::Logical { left, right, .. } => {
                 Self::may_assign(left) || Self::may_assign(right)
             }
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                Self::may_assign(condition)
+                    || Self::may_assign(then_branch)
+                    || Self::may_assign(else_branch)
+            }
             Expr::Grouping { expression } => Self::may_assign(expression),
             Expr::Get { object, .. } => Self::may_assign(object),
             Expr::Set { .. } | Expr::SetModify { .. } => true,
@@ -649,6 +658,23 @@ impl RegCompiler {
                     self.emit(RegOp::Move(dst, work));
                 }
                 self.st.free_reg = saved;
+                Ok(())
+            }
+
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let saved = self.st.free_reg;
+                let c = self.operand_before(condition, Some(&**then_branch))?;
+                let else_jump = self.emit_jump(RegOp::JumpIfFalse(c, 0));
+                self.st.free_reg = saved;
+                self.expr(then_branch, dst)?;
+                let end_jump = self.emit_jump(RegOp::Jump(0));
+                self.patch_jump(else_jump)?;
+                self.expr(else_branch, dst)?;
+                self.patch_jump(end_jump)?;
                 Ok(())
             }
 

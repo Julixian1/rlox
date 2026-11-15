@@ -398,7 +398,7 @@ impl Parser {
  
     /// Parsea expresiones de asignación (`var = expr`, `obj.prop = expr`, `var += expr`, etc.).
     fn assignment(&mut self) -> Result<Expr, String> {
-        let expr = self.parse_precedence(Precedence::Or)?;
+        let expr = self.parse_precedence(Precedence::Ternary)?;
 
         if self.match_token(&[
             TokenType::Equal,

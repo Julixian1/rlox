@@ -98,6 +98,15 @@ impl Resolver {
             Expr::Grouping { expression } => {
                 self.resolve_expr(expression);
             }
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                self.resolve_expr(condition);
+                self.resolve_expr(then_branch);
+                self.resolve_expr(else_branch);
+            }
             Expr::Literal { .. } => {}
             Expr::Logical { left, right, .. } => {
                 self.resolve_expr(left);
@@ -270,5 +279,16 @@ impl ExprVisitor<()> for Resolver {
 
     fn visit_super_expr(&mut self, expr: &Expr, keyword: &Token, _method: &Token) {
         self.resolve_local(expr as *const Expr, keyword);
+    }
+
+    fn visit_ternary_expr(
+        &mut self,
+        condition: &Expr,
+        then_branch: &Expr,
+        else_branch: &Expr,
+    ) {
+        self.resolve_expr(condition);
+        self.resolve_expr(then_branch);
+        self.resolve_expr(else_branch);
     }
 }

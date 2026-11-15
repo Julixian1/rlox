@@ -220,6 +220,15 @@ impl DeclarationCheck {
             }
             Expr::Grouping { expression } => self.check_expr(expression),
             Expr::Unary { right, .. } => self.check_expr(right),
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                self.check_expr(condition);
+                self.check_expr(then_branch);
+                self.check_expr(else_branch);
+            }
             Expr::Literal { .. } => {}
             Expr::Get { object, .. } => self.check_expr(object),
             Expr::Set { object, value, .. } | Expr::SetModify { object, value, .. } => {

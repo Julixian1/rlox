@@ -375,6 +375,18 @@ impl Compiler {
                 operator,
                 right,
             } => self.try_eval_binary(left, &operator.token_type, right),
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                let cond_val = self.try_eval_const(condition)?;
+                if cond_val.is_truthy() {
+                    self.try_eval_const(then_branch)
+                } else {
+                    self.try_eval_const(else_branch)
+                }
+            }
             _ => None,
         }
     }
@@ -908,6 +920,23 @@ impl ExprVisitor<CResult> for Compiler {
         let k = self.identifier_constant(&method.lexeme)?;
         self.emit(OpCode::GetSuper(k));
         Ok(())
+    }
+
+    fn visit_ternary_expr(
+        &mut self,
+        condition: &Expr,
+        then_branch: &Expr,
+        else_branch: &Expr,
+    ) -> CResult {
+        condition.accept(self)?;
+        let then_jump = self.emit_jump(OpCode::JumpIfFalse(0));
+        self.emit(OpCode::Pop);
+        then_branch.accept(self)?;
+        let else_jump = self.emit_jump(OpCode::Jump(0));
+        self.patch_jump(then_jump)?;
+        self.emit(OpCode::Pop);
+        else_branch.accept(self)?;
+        self.patch_jump(else_jump)
     }
 }
 

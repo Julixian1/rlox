@@ -37,6 +37,13 @@ pub trait ExprVisitor<R> {
     fn visit_this_expr(&mut self, expr: &Expr, keyword: &Token) -> R;
     /// Procesa el acceso a método de superclase (`super.method`).
     fn visit_super_expr(&mut self, expr: &Expr, keyword: &Token, method: &Token) -> R;
+    /// Procesa una expresión condicional ternaria (`condition ? then_branch : else_branch`).
+    fn visit_ternary_expr(
+        &mut self,
+        condition: &Expr,
+        then_branch: &Expr,
+        else_branch: &Expr,
+    ) -> R;
 }
 
 // Valores literales en el AST (distinto a token::Literal del scanner).
@@ -122,6 +129,11 @@ pub enum Expr {
         keyword: Token,
         method: Token,
     },
+    Ternary {
+        condition: Box<Expr>,
+        then_branch: Box<Expr>,
+        else_branch: Box<Expr>,
+    },
 }
 
 impl Expr {
@@ -167,6 +179,11 @@ impl Expr {
             } => visitor.visit_set_modify_expr(object, name, operator, value),
             Expr::This { keyword } => visitor.visit_this_expr(self, keyword),
             Expr::Super { keyword, method } => visitor.visit_super_expr(self, keyword, method),
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => visitor.visit_ternary_expr(condition, then_branch, else_branch),
         }
     }
 }
@@ -236,6 +253,11 @@ impl fmt::Display for Expr {
             }
             Expr::This { .. } => write!(f, "this"),
             Expr::Super { method, .. } => write!(f, "(super {})", method.lexeme),
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => write!(f, "(?: {} {} {})", condition, then_branch, else_branch),
         }
     }
 }

@@ -6,6 +6,7 @@ use crate::token::{Literal, TokenType};
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
     Lowest,
+    Ternary,
     Or,
     And,
     Equality,
@@ -20,7 +21,8 @@ impl Precedence {
     fn next(self) -> Self {
         use Precedence::*;
         match self {
-            Lowest => Or,
+            Lowest => Ternary,
+            Ternary => Or,
             Or => And,
             And => Equality,
             Equality => Comparison,
@@ -72,6 +74,8 @@ fn get_rule(t: &TokenType) -> ParseRule {
                                       => rule(None,                   Some(Parser::binary),      P::Comparison),
         T::And                        => rule(None,                   Some(Parser::logical),     P::And),
         T::Or                         => rule(None,                   Some(Parser::logical),     P::Or),
+        T::Question                   => rule(None,                   Some(Parser::ternary),     P::Ternary),
+        T::Colon                      => rule(None,                   None,                      P::Lowest),
         _                             => rule(None,                   None,                      P::Lowest),
     }
 }
@@ -188,6 +192,20 @@ impl Parser {
         Ok(Expr::Get {
             object: Box::new(left),
             name,
+        })
+    }
+
+    fn ternary(&mut self, condition: Expr) -> Result<Expr, String> {
+        let then_branch = self.expression()?;
+        self.consume(
+            &TokenType::Colon,
+            "Expected ':' after then branch of conditional expression.",
+        )?;
+        let else_branch = self.parse_precedence(Precedence::Ternary)?;
+        Ok(Expr::Ternary {
+            condition: Box::new(condition),
+            then_branch: Box::new(then_branch),
+            else_branch: Box::new(else_branch),
         })
     }
 }

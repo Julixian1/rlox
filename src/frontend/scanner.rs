@@ -120,6 +120,8 @@ impl Scanner {
                 );
             }
             ';' => self.add_token(TokenType::Semicolon, None),
+            '?' => self.add_token(TokenType::Question, None),
+            ':' => self.add_token(TokenType::Colon, None),
             '*' => {
                 let matches = self.match_char('=');
                 self.add_token(
