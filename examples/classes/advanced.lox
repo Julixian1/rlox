@@ -1,0 +1,47 @@
+// advanced.lox
+// Demuestra field shadowing (campos que ocultan metodos) y orden estricto de evaluacion de argumentos.
+
+// 1. Field Shadowing
+class Service {
+  execute() {
+    return "comportamiento por defecto del metodo";
+  }
+}
+
+var s = Service();
+print "--- Metodo original ---";
+print s.execute();
+
+// Ocultamos el metodo con una funcion asignada al campo
+fun custom_execute() {
+  return "comportamiento personalizado inyectado en campo";
+}
+
+s.execute = custom_execute;
+print "--- Metodo ocultado por funcion en campo ---";
+print s.execute();
+
+// Asignamos un valor escalar al campo
+s.execute = "propiedad escalar ahora";
+print "--- Campo como valor escalar ---";
+print s.execute;
+
+// 2. Orden de evaluacion de argumentos en llamadas a metodos
+class Dispatcher {
+  process(a, b, c) {
+    print "Parametros recibidos en metodo:";
+    print a;
+    print b;
+    print c;
+  }
+}
+
+fun track(label, val) {
+  print "Evaluando argumento: " + label;
+  return val;
+}
+
+var d = Dispatcher();
+print "--- Evaluacion de argumentos (izq a der) ---";
+d.process(track("primero", 1), track("segundo", 2), track("tercero", 3));
+
