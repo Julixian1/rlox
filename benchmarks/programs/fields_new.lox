@@ -1,0 +1,16 @@
+class Item {
+  init() {}
+}
+
+fun main() {
+  var i = 0;
+  while (i < 200000) {
+    var item = Item();
+    item.a = i;
+    item.b = i + 1;
+    i = i + 1;
+  }
+  print "done";
+}
+main();
+

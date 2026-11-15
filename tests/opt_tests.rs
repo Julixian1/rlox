@@ -2756,3 +2756,119 @@ fn test_e5c_chained_operations_and_grouping() {
     assert_eq!(out_s, expected);
     assert_eq!(out_o2, expected);
 }
+
+// ============================================================================
+// F1 — SetProperty In-Place Optimization
+// ============================================================================
+
+#[test]
+fn test_f1_initial_assignment_and_repeated_updates() {
+    let src = r#"
+        class Box {}
+        var b = Box();
+        b.x = 10;
+        print b.x;
+        b.x = 20;
+        print b.x;
+        b.x = 30;
+        print b.x;
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "10\n20\n30\n");
+    assert_eq!(out_o2, "10\n20\n30\n");
+}
+
+#[test]
+fn test_f1_multiple_fields_and_methods() {
+    let src = r#"
+        class Entity {
+            init(name) {
+                this.name = name;
+                this.hp = 100;
+                this.mana = 50;
+            }
+            damage(amount) {
+                this.hp = this.hp - amount;
+            }
+        }
+        var e = Entity("Hero");
+        e.damage(30);
+        e.mana = 25;
+        print e.name;
+        print e.hp;
+        print e.mana;
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "Hero\n70\n25\n");
+    assert_eq!(out_o2, "Hero\n70\n25\n");
+}
+
+#[test]
+fn test_f1_chained_assignments_and_expression_result() {
+    let src = r#"
+        class Node {}
+        var n = Node();
+        var val = (n.a = n.b = 42);
+        print n.a;
+        print n.b;
+        print val;
+        print (n.a = 100) + 5;
+        print n.a;
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "42\n42\n42\n105\n100\n");
+    assert_eq!(out_o2, "42\n42\n42\n105\n100\n");
+}
+
+#[test]
+fn test_f1_field_shadowing_and_inheritance() {
+    let src = r#"
+        class SuperKlass {
+            greet() {
+                return "hello from super";
+            }
+        }
+        class SubKlass < SuperKlass {}
+        var s = SubKlass();
+        print s.greet();
+
+        // Sombrear el método con un campo
+        s.greet = "shadowed greet";
+        print s.greet;
+
+        // Actualizar el campo que sombrea
+        s.greet = "updated shadow";
+        print s.greet;
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+    assert_eq!(out_o0, "hello from super\nshadowed greet\nupdated shadow\n");
+    assert_eq!(out_o2, "hello from super\nshadowed greet\nupdated shadow\n");
+}
+
+#[test]
+fn test_f1_runtime_error_non_instance_receiver() {
+    let cases = [
+        "var x = 123; x.field = 42;",
+        "var s = \"string\"; s.field = 42;",
+        "var n = nil; n.field = 42;",
+        "var b = true; b.field = 42;",
+    ];
+
+    for src in cases {
+        let stmts = parse_and_check(src);
+        let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+        let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
+
+        let mut vm_o0 = Vm::with_output(Vec::new());
+        let err_o0 = vm_o0.interpret(proto_o0).unwrap_err();
+        let mut vm_o2 = Vm::with_output(Vec::new());
+        let err_o2 = vm_o2.interpret(proto_o2).unwrap_err();
+
+        assert_eq!(err_o0, "[line 1] Only instances have fields.");
+        assert_eq!(err_o2, "[line 1] Only instances have fields.");
+    }
+}

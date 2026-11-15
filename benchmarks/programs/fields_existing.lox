@@ -1,0 +1,19 @@
+class Item {
+  init() {
+    this.a = 1;
+    this.b = 2;
+  }
+}
+
+fun main() {
+  var item = Item();
+  var i = 0;
+  while (i < 500000) {
+    item.a = i;
+    item.b = i + 1;
+    i = i + 1;
+  }
+  print item.a + item.b;
+}
+main();
+

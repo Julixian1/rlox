@@ -680,10 +680,13 @@ impl<W: Write> Vm<W> {
                     let obj = self.pop();
                     match obj {
                         Value::VmInstance(instance) => {
-                            instance
-                                .borrow_mut()
-                                .fields
-                                .insert(name.to_string(), value.clone());
+                            let mut inst = instance.borrow_mut();
+                            if let Some(field) = inst.fields.get_mut(name) {
+                                *field = value.clone();
+                            } else {
+                                inst.fields.insert(name.to_string(), value.clone());
+                            }
+                            drop(inst);
                             self.stack.push(value);
                         }
                         _ => return Err(Self::error(chunk, ip, "Only instances have fields.")),
