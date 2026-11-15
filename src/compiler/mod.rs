@@ -449,66 +449,32 @@ impl Compiler {
     }
 
     fn try_eval_binary(&self, left: &Expr, op: &TokenType, right: &Expr) -> Option<Value> {
-        let l_val = self.try_eval_const(left)?;
-        let r_val = self.try_eval_const(right)?;
+        let l = self.try_eval_const(left)?;
+        let r = self.try_eval_const(right)?;
 
+        // Operadores numéricos: todos requieren (Number, Number)
+        if let (Value::Number(a), Value::Number(b)) = (&l, &r) {
+            let (a, b) = (*a, *b);
+            return match op {
+                TokenType::Plus         => Some(Value::Number(a + b)),
+                TokenType::Minus        => Some(Value::Number(a - b)),
+                TokenType::Star         => Some(Value::Number(a * b)),
+                TokenType::Slash        => Some(Value::Number(a / b)),
+                TokenType::Percent      => Some(Value::Number(a % b)),
+                TokenType::Less         => Some(Value::Boolean(a < b)),
+                TokenType::LessEqual    => Some(Value::Boolean(a <= b)),
+                TokenType::Greater      => Some(Value::Boolean(a > b)),
+                TokenType::GreaterEqual => Some(Value::Boolean(a >= b)),
+                TokenType::EqualEqual   => Some(Value::Boolean(a == b)),
+                TokenType::BangEqual    => Some(Value::Boolean(a != b)),
+                _ => None,
+            };
+        }
+
+        // Igualdad polimórfica sobre otros literales seguros
         match op {
-            TokenType::Plus => match (l_val, r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Number(a + b)),
-                _ => None,
-            },
-            TokenType::Minus => match (l_val, r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Number(a - b)),
-                _ => None,
-            },
-            TokenType::Star => match (l_val, r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Number(a * b)),
-                _ => None,
-            },
-            TokenType::Slash => match (l_val, r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Number(a / b)),
-                _ => None,
-            },
-            TokenType::Percent => match (l_val, r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Number(a % b)),
-                _ => None,
-            },
-            TokenType::Less => match (l_val, r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a < b)),
-                _ => None,
-            },
-            TokenType::LessEqual => match (l_val, r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a <= b)),
-                _ => None,
-            },
-            TokenType::Greater => match (l_val, r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a > b)),
-                _ => None,
-            },
-            TokenType::GreaterEqual => match (l_val, r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a >= b)),
-                _ => None,
-            },
-            TokenType::EqualEqual => match (&l_val, &r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a == b)),
-                (Value::String(a), Value::String(b)) => Some(Value::Boolean(a == b)),
-                (Value::Boolean(a), Value::Boolean(b)) => Some(Value::Boolean(a == b)),
-                (Value::Nil, Value::Nil) => Some(Value::Boolean(true)),
-                _ if is_safe_literal(&l_val) && is_safe_literal(&r_val) => {
-                    Some(Value::Boolean(false))
-                }
-                _ => None,
-            },
-            TokenType::BangEqual => match (&l_val, &r_val) {
-                (Value::Number(a), Value::Number(b)) => Some(Value::Boolean(a != b)),
-                (Value::String(a), Value::String(b)) => Some(Value::Boolean(a != b)),
-                (Value::Boolean(a), Value::Boolean(b)) => Some(Value::Boolean(a != b)),
-                (Value::Nil, Value::Nil) => Some(Value::Boolean(false)),
-                _ if is_safe_literal(&l_val) && is_safe_literal(&r_val) => {
-                    Some(Value::Boolean(true))
-                }
-                _ => None,
-            },
+            TokenType::EqualEqual => const_equal(&l, &r).map(Value::Boolean),
+            TokenType::BangEqual  => const_equal(&l, &r).map(|eq| Value::Boolean(!eq)),
             _ => None,
         }
     }
@@ -575,6 +541,18 @@ fn is_safe_literal(val: &Value) -> bool {
     )
 }
 
+/// Igualdad entre constantes no numéricas; retorna `None` si no se puede decidir en tiempo de compilación.
+/// Los números son manejados por separado en `try_eval_binary`.
+fn const_equal(l: &Value, r: &Value) -> Option<bool> {
+    match (l, r) {
+        (Value::String(a),  Value::String(b))  => Some(a == b),
+        (Value::Boolean(a), Value::Boolean(b)) => Some(a == b),
+        (Value::Nil,        Value::Nil)         => Some(true),
+        _ if is_safe_literal(l) && is_safe_literal(r) => Some(false),
+        _ => None,
+    }
+}
+
 /// Intenta extraer el token identificador si la expresión dada es una variable (desenvolviendo agrupamientos).
 fn extract_var_name(expr: &Expr) -> Option<&Token> {
     match expr {
@@ -603,6 +581,105 @@ fn unwrap_grouping(expr: &Expr) -> &Expr {
     match expr {
         Expr::Grouping { expression } => unwrap_grouping(expression),
         _ => expr,
+    }
+}
+
+impl Compiler {
+    // ---- helpers de visit_binary_expr --------------------------------------
+
+    /// Constant folding: si ambos lados son constantes conocidas en tiempo de compilación,
+    /// emite directamente el valor resultado. Retorna `true` si se plegó.
+    fn try_fold_binary(
+        &mut self,
+        left: &Expr,
+        operator: &Token,
+        right: &Expr,
+    ) -> Result<bool, String> {
+        if !self.opt.constant_folding {
+            return Ok(false);
+        }
+        let Some(val) = self.try_eval_binary(left, &operator.token_type, right) else {
+            return Ok(false);
+        };
+        self.line = operator.line;
+        self.emit_constant_val(val)?;
+        Ok(true)
+    }
+
+    /// Superinstrucción: `local OP const` en una sola instrucción bytecode.
+    /// Solo aplica para `+` y `<` cuando el operando izquierdo es una variable local.
+    fn try_emit_local_const(
+        &mut self,
+        left: &Expr,
+        operator: &Token,
+        right: &Expr,
+    ) -> Result<bool, String> {
+        if !self.opt.superinstructions
+            || !matches!(operator.token_type, TokenType::Plus | TokenType::Less)
+        {
+            return Ok(false);
+        }
+        let Some(name) = extract_var_name(left) else {
+            return Ok(false);
+        };
+        let Some(slot) = self
+            .state()
+            .resolve_local(&name.lexeme)
+            .and_then(|s| u8::try_from(s).ok())
+        else {
+            return Ok(false);
+        };
+        let Some(val) = self.constant_operand(right) else {
+            return Ok(false);
+        };
+        let k = self.make_constant(val)?;
+        self.line = operator.line;
+        self.emit(if operator.token_type == TokenType::Plus {
+            OpCode::AddLocalConst(slot, k)
+        } else {
+            OpCode::LessLocalConst(slot, k)
+        });
+        Ok(true)
+    }
+
+    /// Evalúa `e` como constante en tiempo de compilación.
+    /// Si constant_folding está activo, intenta plegar expresiones compuestas;
+    /// si no, solo acepta literales directos.
+    fn constant_operand(&self, e: &Expr) -> Option<Value> {
+        if self.opt.constant_folding {
+            self.try_eval_const(e)
+        } else {
+            extract_literal(e)
+        }
+    }
+
+    /// Emite el opcode correspondiente al operador binario.
+    /// `BangEqual` se implementa como `Equal` seguido de `Not`.
+    fn emit_binary_op(&mut self, operator: &Token) -> CResult {
+        let (op, negate) = match operator.token_type {
+            TokenType::Plus         => (OpCode::Add,          false),
+            TokenType::Minus        => (OpCode::Subtract,     false),
+            TokenType::Star         => (OpCode::Multiply,     false),
+            TokenType::Slash        => (OpCode::Divide,       false),
+            TokenType::Percent      => (OpCode::Modulo,       false),
+            TokenType::EqualEqual   => (OpCode::Equal,        false),
+            TokenType::BangEqual    => (OpCode::Equal,        true),
+            TokenType::Greater      => (OpCode::Greater,      false),
+            TokenType::GreaterEqual => (OpCode::GreaterEqual, false),
+            TokenType::Less         => (OpCode::Less,         false),
+            TokenType::LessEqual    => (OpCode::LessEqual,    false),
+            _ => {
+                return Err(self.error(&format!(
+                    "Unexpected binary operator '{}'.",
+                    operator.lexeme
+                )));
+            }
+        };
+        self.emit(op);
+        if negate {
+            self.emit(OpCode::Not);
+        }
+        Ok(())
     }
 }
 
@@ -653,86 +730,16 @@ impl ExprVisitor<CResult> for Compiler {
     }
 
     fn visit_binary_expr(&mut self, left: &Expr, operator: &Token, right: &Expr) -> CResult {
-        if self.opt.constant_folding {
-            if let Some(val) = self.try_eval_binary(left, &operator.token_type, right) {
-                self.line = operator.line;
-                return self.emit_constant_val(val);
-            }
+        if self.try_fold_binary(left, operator, right)? {
+            return Ok(());
         }
-
-        if self.opt.superinstructions {
-            if matches!(operator.token_type, TokenType::Plus | TokenType::Less) {
-                if let Some(name) = extract_var_name(left) {
-                    if let Some(slot) = self.state().resolve_local(&name.lexeme) {
-                        if slot <= u8::MAX as usize {
-                            let const_val = if self.opt.constant_folding {
-                                self.try_eval_const(right)
-                            } else {
-                                extract_literal(right)
-                            };
-
-                            if let Some(val) = const_val {
-                                let k = self.make_constant(val)?;
-                                self.line = operator.line;
-                                if operator.token_type == TokenType::Plus {
-                                    self.emit(OpCode::AddLocalConst(slot as u8, k));
-                                } else {
-                                    self.emit(OpCode::LessLocalConst(slot as u8, k));
-                                }
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
-            }
+        if self.try_emit_local_const(left, operator, right)? {
+            return Ok(());
         }
-
         left.accept(self)?;
         right.accept(self)?;
         self.line = operator.line;
-        match operator.token_type {
-            TokenType::Plus => {
-                self.emit(OpCode::Add);
-            }
-            TokenType::Minus => {
-                self.emit(OpCode::Subtract);
-            }
-            TokenType::Star => {
-                self.emit(OpCode::Multiply);
-            }
-            TokenType::Slash => {
-                self.emit(OpCode::Divide);
-            }
-            TokenType::Percent => {
-                self.emit(OpCode::Modulo);
-            }
-            TokenType::EqualEqual => {
-                self.emit(OpCode::Equal);
-            }
-            TokenType::Greater => {
-                self.emit(OpCode::Greater);
-            }
-            TokenType::Less => {
-                self.emit(OpCode::Less);
-            }
-            TokenType::BangEqual => {
-                self.emit(OpCode::Equal);
-                self.emit(OpCode::Not);
-            }
-            TokenType::GreaterEqual => {
-                self.emit(OpCode::GreaterEqual);
-            }
-            TokenType::LessEqual => {
-                self.emit(OpCode::LessEqual);
-            }
-            _ => {
-                return Err(self.error(&format!(
-                    "Unexpected binary operator '{}'.",
-                    operator.lexeme
-                )));
-            }
-        }
-        Ok(())
+        self.emit_binary_op(operator)
     }
 
     fn visit_grouping_expr(&mut self, expression: &Expr) -> CResult {
