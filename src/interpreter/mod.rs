@@ -33,6 +33,30 @@ impl Interpreter {
     /// Crea un nuevo `Interpreter` con un escritor inyectado para capturar la salida de print.
     pub fn with_output<W: Write + Send + 'static>(out: W) -> Self {
         let globals = Rc::new(RefCell::new(Environment::new()));
+        globals.borrow_mut().define(
+            "len".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "len".to_string(),
+                arity: 1,
+                func: crate::value::native_len,
+            })),
+        );
+        globals.borrow_mut().define(
+            "push".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "push".to_string(),
+                arity: 2,
+                func: crate::value::native_push,
+            })),
+        );
+        globals.borrow_mut().define(
+            "pop".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "pop".to_string(),
+                arity: 1,
+                func: crate::value::native_pop,
+            })),
+        );
         Interpreter {
             globals: globals.clone(),
             environment: globals,
@@ -55,9 +79,7 @@ impl Interpreter {
                     ReturnSignal::Return(_) => {
                         Err("Cannot return from top-level code.".to_string())
                     }
-                    ReturnSignal::Break => {
-                        Err("Cannot break from top-level code.".to_string())
-                    }
+                    ReturnSignal::Break => Err("Cannot break from top-level code.".to_string()),
                     ReturnSignal::Continue => {
                         Err("Cannot continue from top-level code.".to_string())
                     }
@@ -200,18 +222,10 @@ impl Interpreter {
                     operator.line
                 ))),
             },
-            TokenType::MinusEqual => {
-                self.num_binary_op(left, right, operator.line, |a, b| a - b)
-            }
-            TokenType::StarEqual => {
-                self.num_binary_op(left, right, operator.line, |a, b| a * b)
-            }
-            TokenType::SlashEqual => {
-                self.num_binary_op(left, right, operator.line, |a, b| a / b)
-            }
-            TokenType::PercentEqual => {
-                self.num_binary_op(left, right, operator.line, |a, b| a % b)
-            }
+            TokenType::MinusEqual => self.num_binary_op(left, right, operator.line, |a, b| a - b),
+            TokenType::StarEqual => self.num_binary_op(left, right, operator.line, |a, b| a * b),
+            TokenType::SlashEqual => self.num_binary_op(left, right, operator.line, |a, b| a / b),
+            TokenType::PercentEqual => self.num_binary_op(left, right, operator.line, |a, b| a % b),
             _ => Err(ReturnSignal::Error(format!(
                 "[line {}] Invalid compound assignment operator.",
                 operator.line
@@ -592,6 +606,19 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
 
                 Ok(Value::Instance(instance))
             }
+            Value::NativeFn(native) => {
+                if args_val.len() != native.arity {
+                    return Err(ReturnSignal::Error(format!(
+                        "[line {}] Expected {} arguments but got {}.",
+                        paren.line,
+                        native.arity,
+                        args_val.len()
+                    )));
+                }
+
+                (native.func)(&args_val)
+                    .map_err(|msg| ReturnSignal::Error(format!("[line {}] {}", paren.line, msg)))
+            }
             _ => Err(ReturnSignal::Error(format!(
                 "[line {}] Can only call functions and classes.",
                 paren.line
@@ -661,7 +688,9 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             })?;
             let rhs = self.evaluate(value)?;
             let new_val = self.apply_compound_op(operator, current, rhs)?;
-            instance.borrow_mut().set(name.lexeme.clone(), new_val.clone());
+            instance
+                .borrow_mut()
+                .set(name.lexeme.clone(), new_val.clone());
             Ok(new_val)
         } else {
             Err(ReturnSignal::Error(format!(
@@ -754,5 +783,97 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
         } else {
             self.evaluate(else_branch)
         }
+    }
+
+    fn visit_list_expr(
+        &mut self,
+        _bracket: &Token,
+        elements: &[Expr],
+    ) -> Result<Value, ReturnSignal> {
+        let mut list = Vec::with_capacity(elements.len());
+        for el in elements {
+            list.push(self.evaluate(el)?);
+        }
+        Ok(Value::List(Rc::new(RefCell::new(list))))
+    }
+
+    fn visit_index_get_expr(
+        &mut self,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+    ) -> Result<Value, ReturnSignal> {
+        let obj = self.evaluate(object)?;
+        let idx = self.evaluate(index)?;
+        match obj {
+            Value::List(l) => {
+                let items = l.borrow();
+                let i = crate::value::validate_list_index(items.len(), &idx).map_err(|msg| {
+                    ReturnSignal::Error(format!("[line {}] {}", bracket.line, msg))
+                })?;
+                Ok(items[i].clone())
+            }
+            _ => Err(ReturnSignal::Error(format!(
+                "[line {}] Only lists can be indexed.",
+                bracket.line
+            ))),
+        }
+    }
+
+    fn visit_index_set_expr(
+        &mut self,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+        value: &Expr,
+    ) -> Result<Value, ReturnSignal> {
+        let obj = self.evaluate(object)?;
+        let idx = self.evaluate(index)?;
+        let val = self.evaluate(value)?;
+        match obj {
+            Value::List(l) => {
+                let mut items = l.borrow_mut();
+                let i = crate::value::validate_list_index(items.len(), &idx).map_err(|msg| {
+                    ReturnSignal::Error(format!("[line {}] {}", bracket.line, msg))
+                })?;
+                items[i] = val.clone();
+                Ok(val)
+            }
+            _ => Err(ReturnSignal::Error(format!(
+                "[line {}] Only lists can be indexed.",
+                bracket.line
+            ))),
+        }
+    }
+
+    fn visit_index_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+        operator: &Token,
+        value: &Expr,
+    ) -> Result<Value, ReturnSignal> {
+        let obj = self.evaluate(object)?;
+        let idx = self.evaluate(index)?;
+        let list = match obj {
+            Value::List(l) => l,
+            _ => {
+                return Err(ReturnSignal::Error(format!(
+                    "[line {}] Only lists can be indexed.",
+                    bracket.line
+                )));
+            }
+        };
+        let (i, cur_val) = {
+            let items = list.borrow();
+            let i = crate::value::validate_list_index(items.len(), &idx)
+                .map_err(|msg| ReturnSignal::Error(format!("[line {}] {}", bracket.line, msg)))?;
+            (i, items[i].clone())
+        };
+        let val = self.evaluate(value)?;
+        let new_val = self.apply_compound_op(operator, cur_val, val)?;
+        list.borrow_mut()[i] = new_val.clone();
+        Ok(new_val)
     }
 }

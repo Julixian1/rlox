@@ -1,0 +1,58 @@
+// basic.lox
+// Demuestra creacion, lectura, escritura, len, push, asignaciones compuestas
+// y mutabilidad compartida (aliasing) en listas nativas de Lox.
+
+// 1. Creacion e inspeccion basica
+var vacia = [];
+print "--- Lista vacia ---";
+print len(vacia); // 0
+
+var numeros = [10, 20, 30];
+print "--- Lista de numeros ---";
+print len(numeros); // 3
+print numeros[0];   // 10
+print numeros[1];   // 20
+print numeros[2];   // 30
+
+// 2. Modificacion por indice
+print "--- Modificacion por indice ---";
+numeros[1] = 99;
+print numeros[1];   // 99
+
+// 3. Asignaciones compuestas sobre indices
+print "--- Asignacion compuesta sobre indice ---";
+numeros[0] += 5;
+numeros[2] *= 2;
+print numeros[0];   // 15
+print numeros[2];   // 60
+
+// 4. Agregar elementos dinamicamente con push()
+print "--- Uso de push() ---";
+push(numeros, 400);
+print len(numeros); // 4
+print numeros[3];   // 400
+
+// 5. Heterogeneidad
+print "--- Lista heterogenea ---";
+var mixta = [1, "hola", true, nil];
+for (var i = 0; i < len(mixta); i += 1) {
+  print mixta[i];
+}
+
+// 6. Mutabilidad compartida (aliasing por referencia)
+print "--- Mutabilidad compartida ---";
+var original = [1, 2, 3];
+var alias = original;
+
+alias[0] = 777;
+print original[0]; // 777
+print alias[0];    // 777
+
+push(alias, 888);
+print len(original); // 4
+print original[3];   // 888
+
+// Identidad de referencia
+print original == alias; // true
+print original == [777, 2, 3, 888]; // false (no hay igualdad estructural)
+

@@ -253,6 +253,31 @@ impl DeclarationCheck {
                 self.check_expr(object);
                 self.check_expr(value);
             }
+            Expr::List { elements, .. } => {
+                for element in elements {
+                    self.check_expr(element);
+                }
+            }
+            Expr::IndexGet { object, index, .. } => {
+                self.check_expr(object);
+                self.check_expr(index);
+            }
+            Expr::IndexSet {
+                object,
+                index,
+                value,
+                ..
+            }
+            | Expr::IndexSetModify {
+                object,
+                index,
+                value,
+                ..
+            } => {
+                self.check_expr(object);
+                self.check_expr(index);
+                self.check_expr(value);
+            }
             Expr::This { keyword } => {
                 if !self.in_class {
                     self.findings.push((

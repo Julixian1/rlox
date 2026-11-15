@@ -122,6 +122,31 @@ impl Resolver {
                 self.resolve_expr(value);
                 self.resolve_expr(object);
             }
+            Expr::List { elements, .. } => {
+                for element in elements {
+                    self.resolve_expr(element);
+                }
+            }
+            Expr::IndexGet { object, index, .. } => {
+                self.resolve_expr(object);
+                self.resolve_expr(index);
+            }
+            Expr::IndexSet {
+                object,
+                index,
+                value,
+                ..
+            }
+            | Expr::IndexSetModify {
+                object,
+                index,
+                value,
+                ..
+            } => {
+                self.resolve_expr(value);
+                self.resolve_expr(object);
+                self.resolve_expr(index);
+            }
             Expr::This { keyword } => {
                 self.resolve_local(ptr, keyword);
             }
@@ -306,14 +331,45 @@ impl ExprVisitor<()> for Resolver {
         self.resolve_local(expr as *const Expr, keyword);
     }
 
-    fn visit_ternary_expr(
-        &mut self,
-        condition: &Expr,
-        then_branch: &Expr,
-        else_branch: &Expr,
-    ) {
+    fn visit_ternary_expr(&mut self, condition: &Expr, then_branch: &Expr, else_branch: &Expr) {
         self.resolve_expr(condition);
         self.resolve_expr(then_branch);
         self.resolve_expr(else_branch);
+    }
+
+    fn visit_list_expr(&mut self, _bracket: &Token, elements: &[Expr]) {
+        for el in elements {
+            self.resolve_expr(el);
+        }
+    }
+
+    fn visit_index_get_expr(&mut self, object: &Expr, _bracket: &Token, index: &Expr) {
+        self.resolve_expr(object);
+        self.resolve_expr(index);
+    }
+
+    fn visit_index_set_expr(
+        &mut self,
+        object: &Expr,
+        _bracket: &Token,
+        index: &Expr,
+        value: &Expr,
+    ) {
+        self.resolve_expr(value);
+        self.resolve_expr(object);
+        self.resolve_expr(index);
+    }
+
+    fn visit_index_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        _bracket: &Token,
+        index: &Expr,
+        _operator: &Token,
+        value: &Expr,
+    ) {
+        self.resolve_expr(value);
+        self.resolve_expr(object);
+        self.resolve_expr(index);
     }
 }

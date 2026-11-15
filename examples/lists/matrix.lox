@@ -1,0 +1,71 @@
+// matrix.lox
+// Demuestra manipulacion de matrices bidimensionales mediante listas anidadas en Lox.
+
+// 1. Creacion dinamica de matriz (filas independientes)
+fun crear_matriz(filas, columnas, valor_inicial) {
+  var matriz = [];
+  for (var i = 0; i < filas; i += 1) {
+    var fila = [];
+    for (var j = 0; j < columnas; j += 1) {
+      push(fila, valor_inicial);
+    }
+    push(matriz, fila);
+  }
+  return matriz;
+}
+
+fun imprimir_matriz(matriz) {
+  for (var i = 0; i < len(matriz); i += 1) {
+    var fila = matriz[i];
+    for (var j = 0; j < len(fila); j += 1) {
+      print fila[j];
+    }
+  }
+}
+
+print "--- Matriz identidad 3x3 literal ---";
+var identidad = [
+  [1, 0, 0],
+  [0, 1, 0],
+  [0, 0, 1]
+];
+print "Lectura encadenada identidad[1][1]:";
+print identidad[1][1]; // 1
+
+print "--- Creacion dinamica de matriz 2x3 con ceros ---";
+var m = crear_matriz(2, 3, 0);
+
+print "--- Modificacion y asignacion compuesta encadenada ---";
+m[0][0] = 10;
+m[0][1] = 20;
+m[0][2] = 30;
+
+m[1][0] = 40;
+m[1][1] = 50;
+m[1][2] = 60;
+
+// Asignacion compuesta encadenada
+m[0][1] += 5;  // 25
+m[1][2] *= 2;  // 120
+
+print "Elementos de la matriz modificada:";
+imprimir_matriz(m);
+
+print "--- Transposicion de matriz 2x3 a 3x2 ---";
+fun transponer(matriz) {
+  var filas = len(matriz);
+  var cols = len(matriz[0]);
+  var t = crear_matriz(cols, filas, 0);
+
+  for (var i = 0; i < filas; i += 1) {
+    for (var j = 0; j < cols; j += 1) {
+      t[j][i] = matriz[i][j];
+    }
+  }
+  return t;
+}
+
+var m_transpuesta = transponer(m);
+print "Matriz transpuesta (3x2):";
+imprimir_matriz(m_transpuesta);
+

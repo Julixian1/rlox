@@ -1,0 +1,67 @@
+// sorting.lox
+// Demuestra algoritmos de ordenamiento in-place (Bubble Sort y Selection Sort)
+// sobre listas mutables en Lox.
+
+fun print_list(arr) {
+  for (var i = 0; i < len(arr); i += 1) {
+    print arr[i];
+  }
+}
+
+// 1. Bubble Sort
+fun bubble_sort(arr) {
+  var n = len(arr);
+  for (var i = 0; i < n; i += 1) {
+    var swapped = false;
+    for (var j = 0; j < n - i - 1; j += 1) {
+      if (arr[j] > arr[j + 1]) {
+        var temp = arr[j];
+        arr[j] = arr[j + 1];
+        arr[j + 1] = temp;
+        swapped = true;
+      }
+    }
+    if (!swapped) {
+      break;
+    }
+  }
+}
+
+print "--- Bubble Sort ---";
+var datos1 = [64, 34, 25, 12, 22, 11, 90];
+print "Original:";
+print_list(datos1);
+
+bubble_sort(datos1);
+
+print "Ordenado:";
+print_list(datos1);
+
+// 2. Selection Sort
+fun selection_sort(arr) {
+  var n = len(arr);
+  for (var i = 0; i < n - 1; i += 1) {
+    var min_idx = i;
+    for (var j = i + 1; j < n; j += 1) {
+      if (arr[j] < arr[min_idx]) {
+        min_idx = j;
+      }
+    }
+    if (min_idx != i) {
+      var temp = arr[i];
+      arr[i] = arr[min_idx];
+      arr[min_idx] = temp;
+    }
+  }
+}
+
+print "--- Selection Sort ---";
+var datos2 = [29, 10, 14, 37, 13];
+print "Original:";
+print_list(datos2);
+
+selection_sort(datos2);
+
+print "Ordenado:";
+print_list(datos2);
+

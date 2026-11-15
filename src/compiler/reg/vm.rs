@@ -2,6 +2,7 @@ use super::chunk::{RegChunk, RegOp};
 use super::closure::{RegClosure, RegFrame, RegProto};
 use crate::closure::{Upvalue, UpvalueRef};
 use crate::value::Value;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::rc::Rc;
@@ -26,10 +27,40 @@ impl RegVm<io::Stdout> {
 
 impl<W: Write> RegVm<W> {
     pub fn with_output(out: W) -> Self {
+        let mut globals = HashMap::new();
+        globals.insert(
+            "len".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "len".to_string(),
+                arity: 1,
+                func: crate::value::native_len,
+            })),
+        );
+        globals.insert(
+            "push".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "push".to_string(),
+                arity: 2,
+                func: crate::value::native_push,
+            })),
+        );
+        globals.insert(
+            "pop".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "pop".to_string(),
+                arity: 1,
+                func: crate::value::native_pop,
+            })),
+        );
+        globals.insert("pop".to_string(), Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+            name: "pop".to_string(),
+            arity: 1,
+            func: crate::value::native_pop,
+        })));
         RegVm {
             registers: Vec::new(),
             frames: Vec::new(),
-            globals: HashMap::new(),
+            globals,
             open_upvalues: Vec::new(),
             out,
         }
@@ -278,18 +309,76 @@ impl<W: Write> RegVm<W> {
                 RegOp::Call(a, argc) => {
                     let callee_reg = base + a as usize;
                     let callee = self.registers[callee_reg].clone();
-                    let called = match callee {
-                        Value::RegClosure(c) => self.call(c, callee_reg, argc as usize),
-                        _ => Err("Can only call functions and classes.".to_string()),
-                    };
-                    called.map_err(|msg| Self::error(chunk, ip, &msg))?;
-
-                    let caller = self.frames.len() - 2;
-                    self.frames[caller].ip = ip;
-                    let frame = self.frames.last().expect("no hay frame");
-                    closure = Rc::clone(&frame.closure);
-                    ip = frame.ip;
-                    base = frame.base;
+                    match callee {
+                        Value::RegClosure(c) => {
+                            self.call(c, callee_reg, argc as usize)
+                                .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            let caller = self.frames.len() - 2;
+                            self.frames[caller].ip = ip;
+                            let frame = self.frames.last().expect("no hay frame");
+                            closure = Rc::clone(&frame.closure);
+                            ip = frame.ip;
+                            base = frame.base;
+                        }
+                        Value::NativeFn(native) => {
+                            let argc = argc as usize;
+                            if argc != native.arity {
+                                return Err(Self::error(
+                                    chunk,
+                                    ip,
+                                    &format!(
+                                        "Expected {} arguments but got {}.",
+                                        native.arity, argc
+                                    ),
+                                ));
+                            }
+                            let args = &self.registers[callee_reg + 1..callee_reg + 1 + argc];
+                            let res =
+                                (native.func)(args).map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            self.registers[callee_reg] = res;
+                        }
+                        _ => {
+                            return Err(Self::error(
+                                chunk,
+                                ip,
+                                "Can only call functions and classes.",
+                            ));
+                        }
+                    }
+                }
+                RegOp::BuildList(d, start, n) => {
+                    let n = n as usize;
+                    let start_idx = base + start as usize;
+                    let elements: Vec<Value> = self.registers[start_idx..start_idx + n].to_vec();
+                    self.registers[base + d as usize] =
+                        Value::List(Rc::new(RefCell::new(elements)));
+                }
+                RegOp::GetIndex(d, l, i) => {
+                    let obj = self.registers[base + l as usize].clone();
+                    let idx = self.registers[base + i as usize].clone();
+                    match obj {
+                        Value::List(list) => {
+                            let items = list.borrow();
+                            let idx_usize = crate::value::validate_list_index(items.len(), &idx)
+                                .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            self.registers[base + d as usize] = items[idx_usize].clone();
+                        }
+                        _ => return Err(Self::error(chunk, ip, "Only lists can be indexed.")),
+                    }
+                }
+                RegOp::SetIndex(l, i, s) => {
+                    let obj = self.registers[base + l as usize].clone();
+                    let idx = self.registers[base + i as usize].clone();
+                    let val = self.registers[base + s as usize].clone();
+                    match obj {
+                        Value::List(list) => {
+                            let mut items = list.borrow_mut();
+                            let idx_usize = crate::value::validate_list_index(items.len(), &idx)
+                                .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            items[idx_usize] = val;
+                        }
+                        _ => return Err(Self::error(chunk, ip, "Only lists can be indexed.")),
+                    }
                 }
                 RegOp::Return(r) => {
                     let result = self.registers[base + r as usize].clone();

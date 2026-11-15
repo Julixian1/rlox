@@ -1,7 +1,7 @@
 use super::Parser;
 use crate::expr::{Expr, LiteralValue};
 use crate::token::{Literal, TokenType};
- 
+
 /// De menor a mayor. El orden de las variantes ES la precedencia.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
@@ -16,7 +16,7 @@ pub enum Precedence {
     Unary,
     Call,
 }
- 
+
 impl Precedence {
     fn next(self) -> Self {
         use Precedence::*;
@@ -33,16 +33,16 @@ impl Precedence {
         }
     }
 }
- 
+
 type PrefixFn = fn(&mut Parser) -> Result<Expr, String>;
 type InfixFn = fn(&mut Parser, Expr) -> Result<Expr, String>;
- 
+
 struct ParseRule {
     prefix: Option<PrefixFn>,
     infix: Option<InfixFn>,
     precedence: Precedence,
 }
- 
+
 fn rule(prefix: Option<PrefixFn>, infix: Option<InfixFn>, precedence: Precedence) -> ParseRule {
     ParseRule {
         prefix,
@@ -50,7 +50,7 @@ fn rule(prefix: Option<PrefixFn>, infix: Option<InfixFn>, precedence: Precedence
         precedence,
     }
 }
- 
+
 #[rustfmt::skip]
 fn get_rule(t: &TokenType) -> ParseRule {
     use Precedence as P;
@@ -58,6 +58,8 @@ fn get_rule(t: &TokenType) -> ParseRule {
     //                                    prefix                      infix                    precedence
     match t {
         T::LeftParen                  => rule(Some(Parser::grouping), Some(Parser::finish_call), P::Call),
+        T::LeftBracket                => rule(Some(Parser::list_literal), Some(Parser::finish_index), P::Call),
+        T::RightBracket               => rule(None,                   None,                      P::Lowest),
         T::Dot                        => rule(None,                   Some(Parser::dot),         P::Call),
         T::Number | T::String         => rule(Some(Parser::value),    None,                      P::Lowest),
         T::Nil | T::True | T::False   => rule(Some(Parser::literal),  None,                      P::Lowest),
@@ -79,7 +81,7 @@ fn get_rule(t: &TokenType) -> ParseRule {
         _                             => rule(None,                   None,                      P::Lowest),
     }
 }
- 
+
 impl Parser {
     /// Parsea una expresión cuyos operadores tengan precedencia >= `min`.
     pub(super) fn parse_precedence(&mut self, min: Precedence) -> Result<Expr, String> {
@@ -92,7 +94,7 @@ impl Parser {
         };
         self.advance();
         let mut left = prefix(self)?;
- 
+
         while min <= get_rule(&self.peek().token_type).precedence {
             self.advance();
             let infix = get_rule(&self.previous().token_type)
@@ -102,9 +104,9 @@ impl Parser {
         }
         Ok(left)
     }
- 
+
     // ---- prefix: el token ya fue consumido y está en previous() ----
- 
+
     fn grouping(&mut self) -> Result<Expr, String> {
         let expr = self.expression()?;
         self.consume(&TokenType::RightParen, "Expected ')' after expression.")?;
@@ -112,7 +114,7 @@ impl Parser {
             expression: Box::new(expr),
         })
     }
- 
+
     fn value(&mut self) -> Result<Expr, String> {
         let token = self.previous().clone();
         match token.literal {
@@ -125,7 +127,7 @@ impl Parser {
             _ => Err(format!("[line {}] Error: Invalid literal.", token.line)),
         }
     }
- 
+
     fn literal(&mut self) -> Result<Expr, String> {
         let value = match self.previous().token_type {
             TokenType::True => LiteralValue::Bool(true),
@@ -134,26 +136,26 @@ impl Parser {
         };
         Ok(Expr::Literal { value })
     }
- 
+
     fn variable(&mut self) -> Result<Expr, String> {
         Ok(Expr::Variable {
             name: self.previous().clone(),
         })
     }
- 
+
     fn this_expr(&mut self) -> Result<Expr, String> {
         Ok(Expr::This {
             keyword: self.previous().clone(),
         })
     }
- 
+
     fn super_expr(&mut self) -> Result<Expr, String> {
         let keyword = self.previous().clone();
         self.consume(&TokenType::Dot, "Expected '.' after 'super'.")?;
         let method = self.consume(&TokenType::Identifier, "Expected superclass method name.")?;
         Ok(Expr::Super { keyword, method })
     }
- 
+
     fn unary(&mut self) -> Result<Expr, String> {
         let operator = self.previous().clone();
         let right = self.parse_precedence(Precedence::Unary)?;
@@ -162,9 +164,9 @@ impl Parser {
             right: Box::new(right),
         })
     }
- 
+
     // ---- infix: el operador está en previous(), el lado izquierdo ya está parseado ----
- 
+
     fn binary(&mut self, left: Expr) -> Result<Expr, String> {
         let operator = self.previous().clone();
         let prec = get_rule(&operator.token_type).precedence;
@@ -175,7 +177,7 @@ impl Parser {
             right: Box::new(right),
         })
     }
- 
+
     fn logical(&mut self, left: Expr) -> Result<Expr, String> {
         let operator = self.previous().clone();
         let prec = get_rule(&operator.token_type).precedence;
@@ -186,7 +188,7 @@ impl Parser {
             right: Box::new(right),
         })
     }
- 
+
     fn dot(&mut self, left: Expr) -> Result<Expr, String> {
         let name = self.consume(&TokenType::Identifier, "Expected property name after '.'.")?;
         Ok(Expr::Get {
@@ -209,4 +211,3 @@ impl Parser {
         })
     }
 }
- 

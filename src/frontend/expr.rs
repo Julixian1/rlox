@@ -38,11 +38,28 @@ pub trait ExprVisitor<R> {
     /// Procesa el acceso a método de superclase (`super.method`).
     fn visit_super_expr(&mut self, expr: &Expr, keyword: &Token, method: &Token) -> R;
     /// Procesa una expresión condicional ternaria (`condition ? then_branch : else_branch`).
-    fn visit_ternary_expr(
+    fn visit_ternary_expr(&mut self, condition: &Expr, then_branch: &Expr, else_branch: &Expr)
+    -> R;
+    /// Procesa una lista literal (`[a, b, c]`).
+    fn visit_list_expr(&mut self, bracket: &Token, elements: &[Expr]) -> R;
+    /// Procesa el acceso por índice (`object[index]`).
+    fn visit_index_get_expr(&mut self, object: &Expr, bracket: &Token, index: &Expr) -> R;
+    /// Procesa la asignación por índice (`object[index] = value`).
+    fn visit_index_set_expr(
         &mut self,
-        condition: &Expr,
-        then_branch: &Expr,
-        else_branch: &Expr,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+        value: &Expr,
+    ) -> R;
+    /// Procesa una asignación compuesta por índice (`object[index] += value`, etc.).
+    fn visit_index_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+        operator: &Token,
+        value: &Expr,
     ) -> R;
 }
 
@@ -134,6 +151,28 @@ pub enum Expr {
         then_branch: Box<Expr>,
         else_branch: Box<Expr>,
     },
+    List {
+        bracket: Token,
+        elements: Vec<Expr>,
+    },
+    IndexGet {
+        object: Box<Expr>,
+        bracket: Token,
+        index: Box<Expr>,
+    },
+    IndexSet {
+        object: Box<Expr>,
+        bracket: Token,
+        index: Box<Expr>,
+        value: Box<Expr>,
+    },
+    IndexSetModify {
+        object: Box<Expr>,
+        bracket: Token,
+        index: Box<Expr>,
+        operator: Token,
+        value: Box<Expr>,
+    },
 }
 
 impl Expr {
@@ -184,6 +223,25 @@ impl Expr {
                 then_branch,
                 else_branch,
             } => visitor.visit_ternary_expr(condition, then_branch, else_branch),
+            Expr::List { bracket, elements } => visitor.visit_list_expr(bracket, elements),
+            Expr::IndexGet {
+                object,
+                bracket,
+                index,
+            } => visitor.visit_index_get_expr(object, bracket, index),
+            Expr::IndexSet {
+                object,
+                bracket,
+                index,
+                value,
+            } => visitor.visit_index_set_expr(object, bracket, index, value),
+            Expr::IndexSetModify {
+                object,
+                bracket,
+                index,
+                operator,
+                value,
+            } => visitor.visit_index_set_modify_expr(object, bracket, index, operator, value),
         }
     }
 }
@@ -249,7 +307,11 @@ impl fmt::Display for Expr {
                 operator,
                 value,
             } => {
-                write!(f, "({} (. {} {}) {})", operator.lexeme, object, name.lexeme, value)
+                write!(
+                    f,
+                    "({} (. {} {}) {})",
+                    operator.lexeme, object, name.lexeme, value
+                )
             }
             Expr::This { .. } => write!(f, "this"),
             Expr::Super { method, .. } => write!(f, "(super {})", method.lexeme),
@@ -258,6 +320,37 @@ impl fmt::Display for Expr {
                 then_branch,
                 else_branch,
             } => write!(f, "(?: {} {} {})", condition, then_branch, else_branch),
+            Expr::List { elements, .. } => {
+                write!(f, "(list")?;
+                for el in elements {
+                    write!(f, " {}", el)?;
+                }
+                write!(f, ")")
+            }
+            Expr::IndexGet { object, index, .. } => {
+                write!(f, "([] {} {})", object, index)
+            }
+            Expr::IndexSet {
+                object,
+                index,
+                value,
+                ..
+            } => {
+                write!(f, "(= ([] {} {}) {})", object, index, value)
+            }
+            Expr::IndexSetModify {
+                object,
+                index,
+                operator,
+                value,
+                ..
+            } => {
+                write!(
+                    f,
+                    "({} ([] {} {}) {})",
+                    operator.lexeme, object, index, value
+                )
+            }
         }
     }
 }

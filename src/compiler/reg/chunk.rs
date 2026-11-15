@@ -8,10 +8,10 @@ pub struct TooLarge;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RegOp {
     // Cargas
-    LoadK(u8, u16),    // dst, const
-    LoadNil(u8),       // dst
+    LoadK(u8, u16),     // dst, const
+    LoadNil(u8),        // dst
     LoadBool(u8, bool), // dst, valor
-    Move(u8, u8),      // dst, src
+    Move(u8, u8),       // dst, src
 
     // Aritmética: dst, izquierda, derecha
     Add(u8, u8, u8),
@@ -29,15 +29,15 @@ pub enum RegOp {
     Lt(u8, u8, u8),
     Le(u8, u8, u8),
 
-    // Saltos 
+    // Saltos
     Jump(u16),
-    JumpIfFalse(u8, u16), 
+    JumpIfFalse(u8, u16),
     Loop(u16),
 
     // Globales
-    GetGlobal(u8, u16),    
-    SetGlobal(u16, u8),   
-    DefineGlobal(u16, u8), 
+    GetGlobal(u8, u16),
+    SetGlobal(u16, u8),
+    DefineGlobal(u16, u8),
 
     // Funciones
     /// Llama a la función del registro `a` con `n` argumentos, que están en
@@ -51,6 +51,11 @@ pub enum RegOp {
     SetUpvalue(u16, u8), // índice de upvalue, src
     /// Cierra los upvalues abiertos sobre el registro dado o los de arriba.
     Close(u8),
+
+    // Listas
+    BuildList(u8, u8, u16), // dst, start_reg, count
+    GetIndex(u8, u8, u8),   // dst, list_reg, index_reg
+    SetIndex(u8, u8, u8),   // list_reg, index_reg, val_reg
 
     // Otros
     Print(u8),
@@ -164,6 +169,10 @@ impl RegChunk {
 
             Print(r) => ("Print", format!("r{r}")),
             Return(r) => ("Return", format!("r{r}")),
+
+            BuildList(d, start, n) => ("BuildList", format!("r{d} r{start}.. {n} el(s)")),
+            GetIndex(d, l, i) => ("GetIndex", format!("r{d} r{l}[r{i}]")),
+            SetIndex(l, i, s) => ("SetIndex", format!("r{l}[r{i}] = r{s}")),
 
             Call(a, n) => ("Call", format!("r{a} {n} arg(s)")),
             Close(r) => ("Close", format!("r{r}")),

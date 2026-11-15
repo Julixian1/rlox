@@ -8,6 +8,87 @@ use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
+pub type NativeFnPtr = fn(&[Value]) -> Result<Value, String>;
+
+#[derive(Clone)]
+pub struct NativeFn {
+    pub name: String,
+    pub arity: usize,
+    pub func: NativeFnPtr,
+}
+
+impl fmt::Debug for NativeFn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<native fn {}>", self.name)
+    }
+}
+
+impl PartialEq for NativeFn {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.arity == other.arity
+            && (self.func as usize == other.func as usize)
+    }
+}
+
+pub fn validate_list_index(list_len: usize, index_val: &Value) -> Result<usize, String> {
+    match index_val {
+        Value::Number(n) => {
+            if n.fract() != 0.0 {
+                return Err("Index must be an integer.".to_string());
+            }
+            if *n < 0.0 {
+                return Err("Index cannot be negative.".to_string());
+            }
+            let idx = *n as usize;
+            if idx >= list_len {
+                return Err(format!("Index out of bounds: {} >= len {}.", idx, list_len));
+            }
+            Ok(idx)
+        }
+        _ => Err("Index must be a number.".to_string()),
+    }
+}
+
+pub fn native_len(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 1 {
+        return Err(format!("Expected 1 argument but got {}.", args.len()));
+    }
+    match &args[0] {
+        Value::List(l) => Ok(Value::Number(l.borrow().len() as f64)),
+        _ => Err("Argument to 'len' must be a list.".to_string()),
+    }
+}
+
+pub fn native_push(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 2 {
+        return Err(format!("Expected 2 arguments but got {}.", args.len()));
+    }
+    match &args[0] {
+        Value::List(l) => {
+            l.borrow_mut().push(args[1].clone());
+            Ok(Value::Nil)
+        }
+        _ => Err("First argument to 'push' must be a list.".to_string()),
+    }
+}
+
+pub fn native_pop(args: &[Value]) -> Result<Value, String> {
+    if args.len() != 1 {
+        return Err(format!("Expected 1 argument but got {}.", args.len()));
+    }
+    match &args[0] {
+        Value::List(l) => {
+            let mut list = l.borrow_mut();
+            if list.is_empty() {
+                return Err("Cannot pop from an empty list.".to_string());
+            }
+            Ok(list.pop().unwrap())
+        }
+        _ => Err("Argument to 'pop' must be a list.".to_string()),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Value {
     Number(f64),
@@ -24,6 +105,8 @@ pub enum Value {
     BoundMethod(Rc<BoundMethod>),
     RegProto(Rc<RegProto>),
     RegClosure(Rc<RegClosure>),
+    List(Rc<RefCell<Vec<Value>>>),
+    NativeFn(Rc<NativeFn>),
 }
 
 impl PartialEq for Value {
@@ -43,6 +126,8 @@ impl PartialEq for Value {
             (Value::BoundMethod(a), Value::BoundMethod(b)) => Rc::ptr_eq(a, b),
             (Value::RegProto(a), Value::RegProto(b)) => Rc::ptr_eq(a, b),
             (Value::RegClosure(a), Value::RegClosure(b)) => Rc::ptr_eq(a, b),
+            (Value::List(a), Value::List(b)) => Rc::ptr_eq(a, b),
+            (Value::NativeFn(a), Value::NativeFn(b)) => Rc::ptr_eq(a, b) || a == b,
             _ => false,
         }
     }
@@ -61,9 +146,12 @@ impl Value {
     }
 }
 
-impl fmt::Display for Value {
-    /// Formatea el valor para su representación textual en salida estándar (ej. en `print`).
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl Value {
+    fn fmt_with_visited(
+        &self,
+        f: &mut fmt::Formatter<'_>,
+        visited: &mut Vec<*const RefCell<Vec<Value>>>,
+    ) -> fmt::Result {
         match self {
             Value::Number(n) => write!(f, "{}", n),
             Value::String(s) => write!(f, "{}", s),
@@ -79,7 +167,35 @@ impl fmt::Display for Value {
             Value::BoundMethod(bound) => write!(f, "{}", bound),
             Value::RegProto(proto) => write!(f, "{}", proto),
             Value::RegClosure(closure) => write!(f, "{}", closure),
+            Value::List(list) => {
+                let ptr = Rc::as_ptr(list);
+                if visited.contains(&ptr) {
+                    return write!(f, "[...]");
+                }
+                visited.push(ptr);
+                let elements = list.borrow();
+                write!(f, "[")?;
+                for (i, el) in elements.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    el.fmt_with_visited(f, visited)?;
+                }
+                write!(f, "]")?;
+                drop(elements);
+                visited.pop();
+                Ok(())
+            }
+            Value::NativeFn(nf) => write!(f, "<native fn {}>", nf.name),
         }
+    }
+}
+
+impl fmt::Display for Value {
+    /// Formatea el valor para su representación textual en salida estándar (ej. en `print`).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut visited = Vec::new();
+        self.fmt_with_visited(f, &mut visited)
     }
 }
 

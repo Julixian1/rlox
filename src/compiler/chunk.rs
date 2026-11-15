@@ -70,6 +70,12 @@ pub enum OpCode {
     // Superinstrucciones (E5.C)
     AddLocalConst(u8, u16),
     LessLocalConst(u8, u16),
+
+    // Listas
+    BuildList(u16),
+    GetIndex,
+    SetIndex,
+    PrepareIndexModify,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -203,6 +209,7 @@ impl Chunk {
                 )
             }
             OpCode::Call(n) | OpCode::Invoke(n) => format!("{:<14} {:4}", name_of(&op), n),
+            OpCode::BuildList(n) => format!("{:<14} {:4}", name_of(&op), n),
             OpCode::AddLocalConst(slot, k) | OpCode::LessLocalConst(slot, k) => {
                 format!(
                     "{:<14} slot:{} const:{} '{}'",
@@ -268,6 +275,10 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::Invoke(_) => "OP_INVOKE",
         OpCode::AddLocalConst(_, _) => "OP_ADD_LOCAL_CONST",
         OpCode::LessLocalConst(_, _) => "OP_LESS_LOCAL_CONST",
+        OpCode::BuildList(_) => "OP_BUILD_LIST",
+        OpCode::GetIndex => "OP_GET_INDEX",
+        OpCode::SetIndex => "OP_SET_INDEX",
+        OpCode::PrepareIndexModify => "OP_PREPARE_INDEX_MODIFY",
     }
 }
 

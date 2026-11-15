@@ -376,9 +376,7 @@ impl Compiler {
                 LiteralValue::StringVal(s) => Some(Value::String(s.clone())),
             },
             Expr::Grouping { expression } => self.try_eval_const(expression),
-            Expr::Unary { operator, right } => {
-                self.try_eval_unary(&operator.token_type, right)
-            }
+            Expr::Unary { operator, right } => self.try_eval_unary(&operator.token_type, right),
             Expr::Binary {
                 left,
                 operator,
@@ -513,7 +511,10 @@ impl Compiler {
     fn compile_stmt_sequence(&mut self, statements: &[Stmt]) -> CResult {
         for (i, stmt) in statements.iter().enumerate() {
             stmt.accept(self)?;
-            if matches!(stmt, Stmt::Return { .. } | Stmt::Break { .. } | Stmt::Continue { .. }) {
+            if matches!(
+                stmt,
+                Stmt::Return { .. } | Stmt::Break { .. } | Stmt::Continue { .. }
+            ) {
                 if self.opt.dead_code_elimination {
                     let dead_tail = &statements[i + 1..];
                     if !dead_tail.is_empty() {
@@ -947,6 +948,58 @@ impl ExprVisitor<CResult> for Compiler {
         else_branch.accept(self)?;
         self.patch_jump(else_jump)
     }
+
+    fn visit_list_expr(&mut self, bracket: &Token, elements: &[Expr]) -> CResult {
+        for el in elements {
+            el.accept(self)?;
+        }
+        self.line = bracket.line;
+        self.emit(OpCode::BuildList(elements.len() as u16));
+        Ok(())
+    }
+
+    fn visit_index_get_expr(&mut self, object: &Expr, bracket: &Token, index: &Expr) -> CResult {
+        object.accept(self)?;
+        index.accept(self)?;
+        self.line = bracket.line;
+        self.emit(OpCode::GetIndex);
+        Ok(())
+    }
+
+    fn visit_index_set_expr(
+        &mut self,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+        value: &Expr,
+    ) -> CResult {
+        object.accept(self)?;
+        index.accept(self)?;
+        value.accept(self)?;
+        self.line = bracket.line;
+        self.emit(OpCode::SetIndex);
+        Ok(())
+    }
+
+    fn visit_index_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+        operator: &Token,
+        value: &Expr,
+    ) -> CResult {
+        object.accept(self)?;
+        index.accept(self)?;
+        self.line = bracket.line;
+        self.emit(OpCode::PrepareIndexModify);
+        value.accept(self)?;
+        self.line = operator.line;
+        self.emit_compound_op(operator)?;
+        self.line = bracket.line;
+        self.emit(OpCode::SetIndex);
+        Ok(())
+    }
 }
 
 impl StmtVisitor<CResult> for Compiler {
@@ -1106,7 +1159,12 @@ impl StmtVisitor<CResult> for Compiler {
         }
 
         let jump = self.emit_jump(OpCode::Jump(0));
-        self.state().loop_contexts.last_mut().unwrap().break_jumps.push(jump);
+        self.state()
+            .loop_contexts
+            .last_mut()
+            .unwrap()
+            .break_jumps
+            .push(jump);
         Ok(())
     }
 
@@ -1131,7 +1189,12 @@ impl StmtVisitor<CResult> for Compiler {
         }
 
         let jump = self.emit_jump(OpCode::Jump(0));
-        self.state().loop_contexts.last_mut().unwrap().continue_jumps.push(jump);
+        self.state()
+            .loop_contexts
+            .last_mut()
+            .unwrap()
+            .continue_jumps
+            .push(jump);
         Ok(())
     }
 
@@ -1466,11 +1529,7 @@ fn resolve_jump_chain(chunk: &Chunk, origin: usize, mut curr_target: usize) -> O
         }
     }
 
-    if changed {
-        Some(curr_target)
-    } else {
-        None
-    }
+    if changed { Some(curr_target) } else { None }
 }
 
 fn compact_chunk_jumps(chunk: &mut Chunk) -> bool {
