@@ -1,6 +1,6 @@
 var i = 0;
 var str = "";
-while (i < 5000) {
+while (i < 50000) {
     str = str + "a";
     i = i + 1;
 }
