@@ -651,3 +651,61 @@ fn test_error_pop_not_a_list() {
     let src = "pop(\"hola\");";
     assert_all_backends_runtime_error(src, "Argument to 'pop' must be a list.");
 }
+
+#[test]
+fn test_error_index_nan() {
+    let src = "var a = [10, 20]; var nan = 0 / 0; print a[nan];";
+    assert_all_backends_runtime_error(src, "Index must be an integer.");
+}
+
+#[test]
+fn test_error_index_infinity() {
+    let src = "var a = [10, 20]; var inf = 1 / 0; print a[inf];";
+    assert_all_backends_runtime_error(src, "Index must be an integer.");
+}
+
+#[test]
+fn test_error_index_negative_infinity() {
+    let src = "var a = [10, 20]; var ninf = -1 / 0; print a[ninf];";
+    assert_all_backends_runtime_error(src, "Index must be an integer.");
+}
+
+#[test]
+fn test_error_index_set_nan() {
+    let src = "var a = [10, 20]; var nan = 0 / 0; a[nan] = 5;";
+    assert_all_backends_runtime_error(src, "Index must be an integer.");
+}
+
+#[test]
+fn test_list_storing_and_calling_functions() {
+    let src = r#"
+fun add(a, b) {
+  return a + b;
+}
+var ops = [add];
+print ops[0](10, 20);
+"#;
+    assert_all_backends_ok(src, "30\n");
+}
+
+#[test]
+fn test_list_recursion_and_closure_mutation() {
+    let src = r#"
+fun make_builder() {
+  var items = [];
+  fun fill(n) {
+    if (n <= 0) return items;
+    push(items, n);
+    return fill(n - 1);
+  }
+  return fill;
+}
+var b = make_builder();
+var res = b(3);
+print len(res);
+print res[0];
+print res[1];
+print res[2];
+"#;
+    assert_all_backends_ok(src, "3\n3\n2\n1\n");
+}
