@@ -29,34 +29,52 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+/// Backend objetivo para las mediciones del benchmark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TargetBackend {
+    /// Máquina virtual de pila (Stack VM).
     Vm,
+    /// Máquina virtual de registros (Register VM).
     Reg,
+    /// Intérprete Tree-Walk sobre AST.
     Tree,
+    /// Todos los backends soportados secuencialmente.
     All,
 }
 
+/// Parámetros de configuración de la corrida de benchmarks.
 #[derive(Debug, Clone)]
 struct BenchConfig {
+    /// Cantidad de ejecuciones de precalentamiento (warmup) no cronometradas.
     warmup: usize,
+    /// Cantidad de repeticiones medidas para el cálculo estadístico.
     reps: usize,
+    /// Backend o conjunto de backends a evaluar.
     backend: TargetBackend,
+    /// Configuración de optimizaciones para la Stack VM.
     opt_config: OptConfig,
+    /// Ruta opcional del archivo CSV de salida.
     csv_path: Option<PathBuf>,
+    /// Archivos `.lox` a evaluar.
     files: Vec<PathBuf>,
 }
 
+/// Resumen estadístico de una serie de tiempos de ejecución (mediana, rango intercuartílico, min y max).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 struct StatSummary {
+    /// Mediana en milisegundos.
     median_ms: f64,
+    /// Rango intercuartílico (IQR) en milisegundos.
     iqr_ms: f64,
+    /// Tiempo mínimo en milisegundos.
     min_ms: f64,
+    /// Tiempo máximo en milisegundos.
     max_ms: f64,
 }
 
 impl StatSummary {
+    /// Calcula el resumen estadístico a partir de un vector de duraciones.
     fn from_durations(mut v: Vec<Duration>) -> Self {
         if v.is_empty() {
             return Self {
@@ -81,10 +99,12 @@ impl StatSummary {
     }
 }
 
+/// Calcula la mediana (cuantil 0.50) de una serie de valores en coma flotante.
 fn calc_median(v: &[f64]) -> f64 {
     calc_quantile(v, 0.50)
 }
 
+/// Calcula un cuantil arbitrario (0.0 a 1.0) mediante interpolación lineal.
 fn calc_quantile(v: &[f64], q: f64) -> f64 {
     let n = v.len();
     if n == 0 {
@@ -103,12 +123,17 @@ fn calc_quantile(v: &[f64], q: f64) -> f64 {
     }
 }
 
+/// Métricas cuantitativas del bytecode compilado.
 struct BytecodeStats {
+    /// Cantidad total de instrucciones de bytecode.
     instructions: usize,
+    /// Cantidad total de constantes en el pool de constantes.
     constants: usize,
+    /// Tamaño estimado en bytes de la representación compilada.
     approx_bytes: usize,
 }
 
+/// Recorre recursivamente un prototipo de función de la Stack VM y calcula las métricas de bytecode acumuladas.
 fn collect_vm_bytecode_stats(proto: &Rc<rlox::closure::FnProto>) -> BytecodeStats {
     let mut visited: HashSet<*const rlox::closure::FnProto> = HashSet::new();
     let mut total_instructions = 0;
@@ -156,6 +181,7 @@ fn collect_vm_bytecode_stats(proto: &Rc<rlox::closure::FnProto>) -> BytecodeStat
     }
 }
 
+/// Recorre recursivamente un prototipo de función de la Register VM y calcula las métricas de bytecode acumuladas.
 fn collect_reg_bytecode_stats(proto: &Rc<rlox::compiler::reg::closure::RegProto>) -> BytecodeStats {
     let mut visited: HashSet<*const rlox::compiler::reg::closure::RegProto> = HashSet::new();
     let mut total_instructions = 0;
@@ -203,12 +229,13 @@ fn collect_reg_bytecode_stats(proto: &Rc<rlox::compiler::reg::closure::RegProto>
     }
 }
 
+/// Parsea los argumentos de línea de comandos para construir la configuración del benchmark.
 fn parse_args() -> BenchConfig {
     let args: Vec<String> = env::args().skip(1).collect();
     let mut warmup = 3;
     let mut reps = 10;
     let mut backend = TargetBackend::Vm;
-    let mut opt_config = OptConfig::default(); // default -O0
+    let mut opt_config = OptConfig::default();
     let mut csv_path = None;
     let mut files = Vec::new();
 
@@ -299,6 +326,7 @@ fn parse_args() -> BenchConfig {
     }
 }
 
+/// Ejecuta las etapas del frontend (escaneo, parseo y chequeo) sobre el código fuente Lox.
 fn run_frontend(source: &str) -> Result<Vec<Stmt>, String> {
     let mut scanner = Scanner::new(source.to_string());
     let tokens = scanner.scan_tokens()?;
@@ -311,6 +339,7 @@ fn run_frontend(source: &str) -> Result<Vec<Stmt>, String> {
     Ok(statements)
 }
 
+/// Ejecuta mediciones detalladas de frontend, compilación y tiempo de VM en la Stack VM.
 fn bench_vm_program(
     source: &str,
     warmup: usize,
@@ -327,7 +356,6 @@ fn bench_vm_program(
     ),
     String,
 > {
-    // 1. Warmup
     for _ in 0..warmup {
         let stmts = run_frontend(source)?;
         let proto = compiler::compile_with_opt(&stmts, opt.clone())?;
@@ -336,7 +364,6 @@ fn bench_vm_program(
         vm.interpret(proto)?;
     }
 
-    // 2. Medición real
     let mut t_front = Vec::with_capacity(reps);
     let mut t_compile = Vec::with_capacity(reps);
     let mut t_vm = Vec::with_capacity(reps);
@@ -388,6 +415,7 @@ fn bench_vm_program(
     ))
 }
 
+/// Ejecuta mediciones detalladas de frontend, compilación y tiempo de VM en la Register VM.
 fn bench_reg_program(
     source: &str,
     warmup: usize,
@@ -462,6 +490,7 @@ fn bench_reg_program(
     ))
 }
 
+/// Ejecuta mediciones de tiempo de frontend y de interpretación en el backend Tree-Walk.
 fn bench_tree_program(
     source: &str,
     warmup: usize,
@@ -508,27 +537,47 @@ fn bench_tree_program(
     ))
 }
 
+/// Registro individual de métricas de benchmark exportable a formato tabular CSV.
 struct CsvRecord {
+    /// Nombre identificador del benchmark.
     benchmark: String,
+    /// Backend evaluado ("vm", "reg", "tree").
     backend: String,
+    /// Nivel de optimización aplicado.
     opt_level: String,
+    /// Pases de optimización activos.
     opt_passes: String,
+    /// Cantidad de repeticiones ejecutadas.
     reps: usize,
+    /// Cantidad de iteraciones de warmup.
     warmup: usize,
+    /// Mediana del tiempo de frontend en milisegundos.
     front_med_ms: f64,
+    /// IQR del tiempo de frontend en milisegundos.
     front_iqr_ms: f64,
+    /// Mediana del tiempo de compilación en milisegundos.
     comp_med_ms: f64,
+    /// IQR del tiempo de compilación en milisegundos.
     comp_iqr_ms: f64,
+    /// Mediana del tiempo de VM o ejecución en milisegundos.
     vm_med_ms: f64,
+    /// IQR del tiempo de VM o ejecución en milisegundos.
     vm_iqr_ms: f64,
+    /// Mediana del tiempo total en milisegundos.
     total_med_ms: f64,
+    /// IQR del tiempo total en milisegundos.
     total_iqr_ms: f64,
+    /// Cantidad de instrucciones generadas.
     instructions: usize,
+    /// Cantidad de constantes generadas.
     constants: usize,
+    /// Tamaño aproximado en bytes del bytecode.
     approx_bytes: usize,
+    /// Estado o mensaje de error de la ejecución.
     status: String,
 }
 
+/// Punto de entrada del harness de benchmarking. Ejecuta pruebas según la configuración provista.
 fn main() {
     let config = parse_args();
 

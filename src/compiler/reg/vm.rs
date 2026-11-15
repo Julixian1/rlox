@@ -1,7 +1,10 @@
+//! Máquina virtual basada en registros (Register VM) y bucle de interpretación.
+
 use super::chunk::{RegChunk, RegOp};
 use super::closure::{RegClosure, RegFrame, RegProto};
 use crate::closure::{Upvalue, UpvalueRef};
 use crate::value::Value;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::rc::Rc;
@@ -9,36 +12,78 @@ use std::rc::Rc;
 /// Mismo límite que la VM de pila: la recursión infinita da "Stack overflow."
 const FRAMES_MAX: usize = 100_000;
 
+/// Máquina virtual basada en registros para la ejecución de bytecode de Lox.
 pub struct RegVm<W: Write> {
-    /// Los registros de un frame son `registers[base + r]`.
+    /// Almacén plano de registros virtuales asignados a los marcos de llamada (`registers[base + r]`).
     registers: Vec<Value>,
+    /// Pila de marcos de llamada de función (`RegFrame`).
     frames: Vec<RegFrame>,
+    /// Tabla hash de variables globales mapeadas por nombre.
     globals: HashMap<String, Value>,
+    /// Lista de upvalues abiertos que apuntan a registros.
     open_upvalues: Vec<UpvalueRef>,
+    /// Flujo de salida donde se dirigen las escrituras (ej. `print`).
     out: W,
 }
 
 impl RegVm<io::Stdout> {
+    /// Crea una nueva máquina virtual de registros con salida estándar (`io::stdout`).
     pub fn new() -> Self {
         Self::with_output(io::stdout())
     }
 }
 
 impl<W: Write> RegVm<W> {
+    /// Crea una nueva máquina virtual de registros con un flujo de salida configurable e inicializa las funciones nativas.
     pub fn with_output(out: W) -> Self {
+        let mut globals = HashMap::new();
+        globals.insert(
+            "len".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "len".to_string(),
+                arity: 1,
+                func: crate::value::native_len,
+            })),
+        );
+        globals.insert(
+            "push".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "push".to_string(),
+                arity: 2,
+                func: crate::value::native_push,
+            })),
+        );
+        globals.insert(
+            "pop".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "pop".to_string(),
+                arity: 1,
+                func: crate::value::native_pop,
+            })),
+        );
+        globals.insert(
+            "pop".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "pop".to_string(),
+                arity: 1,
+                func: crate::value::native_pop,
+            })),
+        );
         RegVm {
             registers: Vec::new(),
             frames: Vec::new(),
-            globals: HashMap::new(),
+            globals,
             open_upvalues: Vec::new(),
             out,
         }
     }
 
+    /// Consume la máquina virtual retornando el flujo de salida subyacente.
     pub fn into_output(self) -> W {
         self.out
     }
 
+    /// Interpreta un prototipo compilado en la Register VM hasta su finalización.
     pub fn interpret(&mut self, script: Rc<RegProto>) -> Result<(), String> {
         self.registers.clear();
         self.frames.clear();
@@ -96,8 +141,6 @@ impl<W: Write> RegVm<W> {
         Ok(())
     }
 
-    // ---- upvalues -------------------------------------------------------
-
     fn open_index(upvalue: &UpvalueRef) -> usize {
         upvalue
             .borrow()
@@ -133,8 +176,6 @@ impl<W: Write> RegVm<W> {
         }
     }
 
-    // ---- llamadas ---------------------------------------------------------
-
     /// Apila el frame de `closure`. Su registro 0 es `registers[callee + 1]`, o sea
     /// el primer argumento que dejó el llamador.
     fn call(&mut self, closure: Rc<RegClosure>, callee: usize, argc: usize) -> Result<(), String> {
@@ -154,6 +195,7 @@ impl<W: Write> RegVm<W> {
         Ok(())
     }
 
+    /// Bucle principal de despacho e interpretación de instrucciones para la Register VM.
     fn run(&mut self) -> Result<(), String> {
         let mut closure = Rc::clone(&self.frames.last().expect("no hay frame").closure);
         let mut ip = 0;
@@ -278,18 +320,76 @@ impl<W: Write> RegVm<W> {
                 RegOp::Call(a, argc) => {
                     let callee_reg = base + a as usize;
                     let callee = self.registers[callee_reg].clone();
-                    let called = match callee {
-                        Value::RegClosure(c) => self.call(c, callee_reg, argc as usize),
-                        _ => Err("Can only call functions and classes.".to_string()),
-                    };
-                    called.map_err(|msg| Self::error(chunk, ip, &msg))?;
-
-                    let caller = self.frames.len() - 2;
-                    self.frames[caller].ip = ip;
-                    let frame = self.frames.last().expect("no hay frame");
-                    closure = Rc::clone(&frame.closure);
-                    ip = frame.ip;
-                    base = frame.base;
+                    match callee {
+                        Value::RegClosure(c) => {
+                            self.call(c, callee_reg, argc as usize)
+                                .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            let caller = self.frames.len() - 2;
+                            self.frames[caller].ip = ip;
+                            let frame = self.frames.last().expect("no hay frame");
+                            closure = Rc::clone(&frame.closure);
+                            ip = frame.ip;
+                            base = frame.base;
+                        }
+                        Value::NativeFn(native) => {
+                            let argc = argc as usize;
+                            if argc != native.arity {
+                                return Err(Self::error(
+                                    chunk,
+                                    ip,
+                                    &format!(
+                                        "Expected {} arguments but got {}.",
+                                        native.arity, argc
+                                    ),
+                                ));
+                            }
+                            let args = &self.registers[callee_reg + 1..callee_reg + 1 + argc];
+                            let res =
+                                (native.func)(args).map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            self.registers[callee_reg] = res;
+                        }
+                        _ => {
+                            return Err(Self::error(
+                                chunk,
+                                ip,
+                                "Can only call functions and classes.",
+                            ));
+                        }
+                    }
+                }
+                RegOp::BuildList(d, start, n) => {
+                    let n = n as usize;
+                    let start_idx = base + start as usize;
+                    let elements: Vec<Value> = self.registers[start_idx..start_idx + n].to_vec();
+                    self.registers[base + d as usize] =
+                        Value::List(Rc::new(RefCell::new(elements)));
+                }
+                RegOp::GetIndex(d, l, i) => {
+                    let obj = self.registers[base + l as usize].clone();
+                    let idx = self.registers[base + i as usize].clone();
+                    match obj {
+                        Value::List(list) => {
+                            let items = list.borrow();
+                            let idx_usize = crate::value::validate_list_index(items.len(), &idx)
+                                .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            self.registers[base + d as usize] = items[idx_usize].clone();
+                        }
+                        _ => return Err(Self::error(chunk, ip, "Only lists can be indexed.")),
+                    }
+                }
+                RegOp::SetIndex(l, i, s) => {
+                    let obj = self.registers[base + l as usize].clone();
+                    let idx = self.registers[base + i as usize].clone();
+                    let val = self.registers[base + s as usize].clone();
+                    match obj {
+                        Value::List(list) => {
+                            let mut items = list.borrow_mut();
+                            let idx_usize = crate::value::validate_list_index(items.len(), &idx)
+                                .map_err(|msg| Self::error(chunk, ip, &msg))?;
+                            items[idx_usize] = val;
+                        }
+                        _ => return Err(Self::error(chunk, ip, "Only lists can be indexed.")),
+                    }
                 }
                 RegOp::Return(r) => {
                     let result = self.registers[base + r as usize].clone();

@@ -1,10 +1,18 @@
+//! Analizador léxico (Scanner) encargado de convertir el código fuente en un flujo de tokens.
+
 use crate::token::{Literal, Token, TokenType, get_keyword};
 
+/// Analizador léxico que recorre caracteres del código fuente y genera tokens de Lox.
 pub struct Scanner {
+    /// Caracteres del código fuente cargados en memoria.
     source: Vec<char>,
+    /// Tokens generados durante el proceso de escaneo.
     tokens: Vec<Token>,
+    /// Índice de inicio del lexema actualmente analizado.
     start: usize,
+    /// Índice del carácter actual en inspección.
     current: usize,
+    /// Número de línea actual en el archivo fuente.
     line: usize,
 }
 
@@ -90,11 +98,12 @@ impl Scanner {
             ' ' | '\r' | '\t' => {}
             '\n' => self.line += 1,
 
-            // Tokens de un solo carácter
             '(' => self.add_token(TokenType::LeftParen, None),
             ')' => self.add_token(TokenType::RightParen, None),
             '{' => self.add_token(TokenType::LeftBrace, None),
             '}' => self.add_token(TokenType::RightBrace, None),
+            '[' => self.add_token(TokenType::LeftBracket, None),
+            ']' => self.add_token(TokenType::RightBracket, None),
             ',' => self.add_token(TokenType::Comma, None),
             '.' => self.add_token(TokenType::Dot, None),
             '-' => {
@@ -157,7 +166,6 @@ impl Scanner {
                 }
             }
 
-            // Tokens de uno o dos caracteres
             '!' => {
                 let matches = self.match_char('=');
                 self.add_token(
@@ -203,7 +211,6 @@ impl Scanner {
                 );
             }
 
-            // Strings con comillas simples ('')
             '\'' => {
                 while !self.is_at_end() && self.peek() != '\'' && self.peek() != '\n' {
                     self.advance();
@@ -213,7 +220,7 @@ impl Scanner {
                     return Err(format!("Unterminated string: `{}`", self.lexeme()));
                 }
 
-                self.advance(); // Consumir la comilla de cierre
+                self.advance();
 
                 let value: String = self.source[self.start + 1..self.current - 1]
                     .iter()
@@ -221,7 +228,6 @@ impl Scanner {
                 self.add_token(TokenType::String, Some(Literal::String(value)));
             }
 
-            // Strings con comillas dobles ("")
             '"' => {
                 while !self.is_at_end() && self.peek() != '"' {
                     self.advance();
@@ -231,7 +237,7 @@ impl Scanner {
                     return Err(format!("Unterminated string: `{}`", self.lexeme()));
                 }
 
-                self.advance(); // Consumir la comilla de cierre
+                self.advance();
 
                 let value: String = self.source[self.start + 1..self.current - 1]
                     .iter()
@@ -239,7 +245,6 @@ impl Scanner {
                 self.add_token(TokenType::String, Some(Literal::String(value)));
             }
 
-            // Números
             c_val if c_val.is_ascii_digit() => {
                 let mut scanned_dots = 0;
 
@@ -265,7 +270,6 @@ impl Scanner {
                 self.add_token(TokenType::Number, Some(Literal::Number(numvalue)));
             }
 
-            // Identificadores y palabras reservadas
             c_val if is_alpha(c_val) => {
                 while !self.is_at_end() && is_alphanum(self.peek()) {
                     self.advance();
@@ -276,7 +280,6 @@ impl Scanner {
                 self.add_token(token_type, None);
             }
 
-            // Carácter inesperado
             _ => {
                 return Err(format!("Unexpected character: `{}`", c));
             }

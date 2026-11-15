@@ -1,3 +1,5 @@
+//! Verificaciones estáticas y análisis semántico previo a la ejecución.
+
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -5,8 +7,10 @@ use crate::expr::Expr;
 use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::Token;
 
+/// Registro de un error semántico compuesto por el número de línea y el mensaje descriptivo.
 type Finding = (usize, String);
 
+/// Realiza pasadas de análisis semántico sobre las sentencias del AST y devuelve los errores encontrados ordenados por línea.
 pub fn check(statements: &[Stmt]) -> Vec<String> {
     let mut findings = ReturnCheck::run(statements);
     findings.extend(DeclarationCheck::run(statements));
@@ -15,19 +19,25 @@ pub fn check(statements: &[Stmt]) -> Vec<String> {
     findings.into_iter().map(|(_, message)| message).collect()
 }
 
+/// Contexto léxico de función para validar la legalidad de sentencias `return`.
 #[derive(Copy, Clone, PartialEq)]
 enum FunctionContext {
+    /// Fuera de cualquier declaración de función (código de nivel superior).
     None,
+    /// Dentro de una función o método estándar.
     Function,
+    /// Dentro de un método constructor `init`.
     Initializer,
 }
 
+/// Pasada de validación que detecta usos ilegales de la sentencia `return`.
 struct ReturnCheck {
     context: FunctionContext,
     findings: Vec<Finding>,
 }
 
 impl ReturnCheck {
+    /// Ejecuta la pasada de validación de retornos sobre una lista de sentencias.
     fn run(statements: &[Stmt]) -> Vec<Finding> {
         let mut pass = ReturnCheck {
             context: FunctionContext::None,
@@ -41,7 +51,6 @@ impl ReturnCheck {
 }
 
 impl StmtVisitor<()> for ReturnCheck {
-    // Estos statements no contienen otros statements: nada que recorrer.
     fn visit_expression_stmt(&mut self, _expression: &Expr) {}
     fn visit_print_stmt(&mut self, _expression: &Expr) {}
     fn visit_var_stmt(&mut self, _name: &Token, _initializer: &Option<Expr>) {}
@@ -132,13 +141,18 @@ impl StmtVisitor<()> for ReturnCheck {
     }
 }
 
+/// Contexto de clase actual para la validación contextual de `this` y `super`.
 #[derive(Copy, Clone, PartialEq)]
 enum ClassContext {
+    /// Fuera de cualquier declaración de clase.
     None,
+    /// Dentro de una clase sin superclase declarada.
     Class,
+    /// Dentro de una subclase con herencia explícita.
     Subclass,
 }
 
+/// Pasada de validación de variables locales, inicializadores y alcance léxico de `this` y `super`.
 struct DeclarationCheck {
     scopes: Vec<HashMap<String, bool>>,
     findings: Vec<Finding>,
@@ -147,6 +161,7 @@ struct DeclarationCheck {
 }
 
 impl DeclarationCheck {
+    /// Ejecuta la pasada de validación de declaraciones sobre una lista de sentencias.
     fn run(statements: &[Stmt]) -> Vec<Finding> {
         let mut pass = DeclarationCheck {
             scopes: Vec::new(),
@@ -160,15 +175,17 @@ impl DeclarationCheck {
         pass.findings
     }
 
+    /// Abre un nuevo ámbito léxico de variables locales.
     fn begin_scope(&mut self) {
         self.scopes.push(HashMap::new());
     }
 
+    /// Cierra el ámbito léxico de variables locales actual.
     fn end_scope(&mut self) {
         self.scopes.pop();
     }
 
-    /// Declara la variable en el scope actual, todavía sin inicializar.
+    /// Declara una variable en el ámbito actual marcándola como aún no inicializada.
     fn declare(&mut self, name: &Token) {
         if let Some(scope) = self.scopes.last_mut() {
             if scope.contains_key(&name.lexeme) {
@@ -184,12 +201,14 @@ impl DeclarationCheck {
         }
     }
 
+    /// Marca la variable del ámbito actual como completamente inicializada.
     fn define(&mut self, name: &Token) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.lexeme.clone(), true);
         }
     }
 
+    /// Inspecciona una expresión para verificar que no lea variables durante su propia inicialización.
     fn check_expr(&mut self, expr: &Expr) {
         match expr {
             Expr::Variable { name } => {
@@ -251,6 +270,31 @@ impl DeclarationCheck {
             Expr::Get { object, .. } => self.check_expr(object),
             Expr::Set { object, value, .. } | Expr::SetModify { object, value, .. } => {
                 self.check_expr(object);
+                self.check_expr(value);
+            }
+            Expr::List { elements, .. } => {
+                for element in elements {
+                    self.check_expr(element);
+                }
+            }
+            Expr::IndexGet { object, index, .. } => {
+                self.check_expr(object);
+                self.check_expr(index);
+            }
+            Expr::IndexSet {
+                object,
+                index,
+                value,
+                ..
+            }
+            | Expr::IndexSetModify {
+                object,
+                index,
+                value,
+                ..
+            } => {
+                self.check_expr(object);
+                self.check_expr(index);
                 self.check_expr(value);
             }
             Expr::This { keyword } => {
@@ -333,7 +377,6 @@ impl StmtVisitor<()> for DeclarationCheck {
     }
 
     fn visit_function_stmt(&mut self, name: &Token, params: &[Token], body: &Rc<Vec<Stmt>>) {
-        // El nombre queda definido antes del cuerpo: la función puede llamarse a sí misma.
         self.declare(name);
         self.define(name);
 
@@ -414,12 +457,14 @@ impl StmtVisitor<()> for DeclarationCheck {
     }
 }
 
+/// Pasada de validación que asegura que las sentencias `break` y `continue` ocurran únicamente dentro de bucles.
 struct LoopCheck {
     loop_depth: usize,
     findings: Vec<Finding>,
 }
 
 impl LoopCheck {
+    /// Ejecuta la pasada de validación de bucles sobre una lista de sentencias.
     fn run(statements: &[Stmt]) -> Vec<Finding> {
         let mut pass = LoopCheck {
             loop_depth: 0,

@@ -1,3 +1,5 @@
+//! Representación de funciones definidas por el usuario y señales de control para el intérprete Tree-Walk.
+
 use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
@@ -12,12 +14,16 @@ use crate::value::Value;
 
 static NEXT_FUNCTION_ID: AtomicUsize = AtomicUsize::new(0);
 
-/// Señal de control utilizada para propagar valores de retorno o errores durante la ejecución de funciones.
+/// Señal de control utilizada para propagar valores de retorno, cortes de bucle o errores durante la ejecución.
 #[derive(Debug)]
 pub enum ReturnSignal {
+    /// Retorno de un valor desde una función.
     Return(Value),
+    /// Interrupción de un bucle (`break`).
     Break,
+    /// Continuación a la siguiente iteración de un bucle (`continue`).
     Continue,
+    /// Error en tiempo de ejecución con mensaje descriptivo.
     Error(String),
 }
 
@@ -31,11 +37,17 @@ impl From<String> for ReturnSignal {
 /// Representa una función definida por el usuario en el lenguaje Lox (incluyendo su clausura/closure).
 #[derive(Clone)]
 pub struct LoxFunction {
+    /// Identificador único de la función en tiempo de ejecución.
     pub id: usize,
+    /// Token identificador con el nombre de la función.
     pub name: Token,
+    /// Lista de tokens correspondientes a los parámetros formales.
     pub params: Vec<Token>,
+    /// Sentencias que componen el cuerpo de la función.
     pub body: Rc<Vec<Stmt>>,
+    /// Entorno léxico capturado al momento de declarar la función.
     pub closure: Rc<RefCell<Environment>>,
+    /// Indica si la función actúa como inicializador (`init`) de una clase.
     pub is_initializer: bool,
 }
 
@@ -103,17 +115,16 @@ impl LoxFunction {
         let result = interpreter.execute_block(&self.body, environment);
 
         match result {
-            // 1. Un error en tiempo de ejecución SIEMPRE se propaga de inmediato como Err.
-            // NUNCA debe convertirse en retorno de 'this'.
+            // Un error en tiempo de ejecución se propaga de inmediato sin convertirlo en 'this'.
             Err(ReturnSignal::Error(err)) => Err(ReturnSignal::Error(err)),
-            Err(ReturnSignal::Break) => {
-                Err(ReturnSignal::Error("Cannot break out of a function.".to_string()))
-            }
-            Err(ReturnSignal::Continue) => {
-                Err(ReturnSignal::Error("Cannot continue out of a function.".to_string()))
-            }
+            Err(ReturnSignal::Break) => Err(ReturnSignal::Error(
+                "Cannot break out of a function.".to_string(),
+            )),
+            Err(ReturnSignal::Continue) => Err(ReturnSignal::Error(
+                "Cannot continue out of a function.".to_string(),
+            )),
 
-            // 2. Un retorno explícito en un inicializador devuelve 'this'.
+            // Retorno explícito: en inicializadores devuelve 'this'.
             Err(ReturnSignal::Return(value)) => {
                 if self.is_initializer {
                     self.closure
@@ -125,7 +136,7 @@ impl LoxFunction {
                 }
             }
 
-            // 3. Finalización normal del bloque de código.
+            // Finalización normal del cuerpo de la función.
             Ok(_) => {
                 if self.is_initializer {
                     self.closure

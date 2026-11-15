@@ -1,3 +1,5 @@
+//! Representación de sentencias (statements) del AST y trait visitor correspondiente.
+
 use crate::expr::Expr;
 use crate::token::Token;
 
@@ -42,52 +44,48 @@ pub trait StmtVisitor<R> {
     fn visit_class_stmt(&mut self, name: &Token, superclass: &Option<Expr>, methods: &[Stmt]) -> R;
 }
 
-// Nodos de statement del AST.
+/// Nodos del Árbol de Sintaxis Abstracta (AST) que representan sentencias ejecutables.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
-    Expression {
-        expression: Expr,
-    },
-    Print {
-        expression: Expr,
-    },
+    /// Sentencia de expresión evaluable (`expr;`).
+    Expression { expression: Expr },
+    /// Sentencia de impresión en salida estándar (`print expr;`).
+    Print { expression: Expr },
+    /// Declaración de variable (`var name = initializer;`).
     Var {
         name: Token,
         initializer: Option<Expr>,
     },
-    Block {
-        statements: Vec<Stmt>,
-    },
+    /// Bloque de sentencias delimitado por llaves `{ ... }`.
+    Block { statements: Vec<Stmt> },
+    /// Sentencia condicional bifurcada `if (cond) then_branch else else_branch`.
     If {
         condition: Expr,
         then_branch: Box<Stmt>,
         else_branch: Option<Box<Stmt>>,
     },
-    While {
-        condition: Expr,
-        body: Box<Stmt>,
-    },
+    /// Bucle condicional `while (cond) body`.
+    While { condition: Expr, body: Box<Stmt> },
+    /// Declaración de función o método (`fun name(params) { body }`).
     Function {
         name: Token,
         params: Vec<Token>,
         body: Rc<Vec<Stmt>>,
     },
-    Return {
-        keyword: Token,
-        value: Option<Expr>,
-    },
-    Break {
-        keyword: Token,
-    },
-    Continue {
-        keyword: Token,
-    },
+    /// Sentencia de retorno explícito de función (`return expr;`).
+    Return { keyword: Token, value: Option<Expr> },
+    /// Sentencia de terminación inmediata de bucle (`break;`).
+    Break { keyword: Token },
+    /// Sentencia de continuación a la siguiente iteración de bucle (`continue;`).
+    Continue { keyword: Token },
+    /// Bucle determinado con cláusulas `for (init; cond; inc) body`.
     For {
         initializer: Option<Box<Stmt>>,
         condition: Option<Expr>,
         increment: Option<Expr>,
         body: Box<Stmt>,
     },
+    /// Declaración de clase con superclase opcional y lista de métodos.
     Class {
         name: Token,
         superclass: Option<Expr>,

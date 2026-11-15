@@ -1,3 +1,5 @@
+//! Nodos de expresión del AST y trait visitor para su procesamiento.
+
 use crate::token::Token;
 use std::fmt;
 
@@ -38,20 +40,41 @@ pub trait ExprVisitor<R> {
     /// Procesa el acceso a método de superclase (`super.method`).
     fn visit_super_expr(&mut self, expr: &Expr, keyword: &Token, method: &Token) -> R;
     /// Procesa una expresión condicional ternaria (`condition ? then_branch : else_branch`).
-    fn visit_ternary_expr(
+    fn visit_ternary_expr(&mut self, condition: &Expr, then_branch: &Expr, else_branch: &Expr)
+    -> R;
+    /// Procesa una lista literal (`[a, b, c]`).
+    fn visit_list_expr(&mut self, bracket: &Token, elements: &[Expr]) -> R;
+    /// Procesa el acceso por índice (`object[index]`).
+    fn visit_index_get_expr(&mut self, object: &Expr, bracket: &Token, index: &Expr) -> R;
+    /// Procesa la asignación por índice (`object[index] = value`).
+    fn visit_index_set_expr(
         &mut self,
-        condition: &Expr,
-        then_branch: &Expr,
-        else_branch: &Expr,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+        value: &Expr,
+    ) -> R;
+    /// Procesa una asignación compuesta por índice (`object[index] += value`, etc.).
+    fn visit_index_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+        operator: &Token,
+        value: &Expr,
     ) -> R;
 }
 
-// Valores literales en el AST (distinto a token::Literal del scanner).
+/// Representa los valores literales presentes en los nodos del AST.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralValue {
+    /// Literal numérico en coma flotante.
     Number(f64),
+    /// Literal de cadena de texto.
     StringVal(String),
+    /// Literal booleano.
     Bool(bool),
+    /// Literal nulo `nil`.
     Nil,
 }
 
@@ -67,72 +90,90 @@ impl fmt::Display for LiteralValue {
     }
 }
 
-// Nodos de expresión del AST.
+/// Nodos del Árbol de Sintaxis Abstracta (AST) que representan expresiones evaluables.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    Literal {
-        value: LiteralValue,
-    },
-    Unary {
-        operator: Token,
-        right: Box<Expr>,
-    },
+    /// Expresión literal constante.
+    Literal { value: LiteralValue },
+    /// Operación unaria prefija (`-x`, `!y`).
+    Unary { operator: Token, right: Box<Expr> },
+    /// Operación binaria infija (`a + b`, `x == y`).
     Binary {
         left: Box<Expr>,
         operator: Token,
         right: Box<Expr>,
     },
-    Grouping {
-        expression: Box<Expr>,
-    },
-    Variable {
-        name: Token,
-    },
-    Assign {
-        name: Token,
-        value: Box<Expr>,
-    },
+    /// Expresión agrupada entre paréntesis `(expr)`.
+    Grouping { expression: Box<Expr> },
+    /// Acceso a una variable por identificador.
+    Variable { name: Token },
+    /// Asignación a una variable (`x = expr`).
+    Assign { name: Token, value: Box<Expr> },
+    /// Asignación compuesta a una variable (`x += expr`, etc.).
     AssignModify {
         name: Token,
         operator: Token,
         value: Box<Expr>,
     },
+    /// Operador lógico con evaluación de cortocircuito (`and`, `or`).
     Logical {
         left: Box<Expr>,
         operator: Token,
         right: Box<Expr>,
     },
+    /// Llamada a función o método (`callee(arguments)`).
     Call {
         callee: Box<Expr>,
         paren: Token,
         arguments: Vec<Expr>,
     },
-    Get {
-        object: Box<Expr>,
-        name: Token,
-    },
+    /// Acceso a propiedad de instancia (`object.name`).
+    Get { object: Box<Expr>, name: Token },
+    /// Asignación a propiedad de instancia (`object.name = value`).
     Set {
         object: Box<Expr>,
         name: Token,
         value: Box<Expr>,
     },
+    /// Asignación compuesta a propiedad de instancia (`object.name += value`, etc.).
     SetModify {
         object: Box<Expr>,
         name: Token,
         operator: Token,
         value: Box<Expr>,
     },
-    This {
-        keyword: Token,
-    },
-    Super {
-        keyword: Token,
-        method: Token,
-    },
+    /// Referencia a la instancia receptora actual (`this`).
+    This { keyword: Token },
+    /// Acceso a método de la superclase (`super.method`).
+    Super { keyword: Token, method: Token },
+    /// Expresión condicional ternaria (`condition ? then_branch : else_branch`).
     Ternary {
         condition: Box<Expr>,
         then_branch: Box<Expr>,
         else_branch: Box<Expr>,
+    },
+    /// Literal de lista (`[elem1, elem2, ...]`).
+    List { bracket: Token, elements: Vec<Expr> },
+    /// Acceso indexado a colección (`object[index]`).
+    IndexGet {
+        object: Box<Expr>,
+        bracket: Token,
+        index: Box<Expr>,
+    },
+    /// Asignación indexada a colección (`object[index] = value`).
+    IndexSet {
+        object: Box<Expr>,
+        bracket: Token,
+        index: Box<Expr>,
+        value: Box<Expr>,
+    },
+    /// Asignación compuesta indexada (`object[index] += value`, etc.).
+    IndexSetModify {
+        object: Box<Expr>,
+        bracket: Token,
+        index: Box<Expr>,
+        operator: Token,
+        value: Box<Expr>,
     },
 }
 
@@ -184,6 +225,25 @@ impl Expr {
                 then_branch,
                 else_branch,
             } => visitor.visit_ternary_expr(condition, then_branch, else_branch),
+            Expr::List { bracket, elements } => visitor.visit_list_expr(bracket, elements),
+            Expr::IndexGet {
+                object,
+                bracket,
+                index,
+            } => visitor.visit_index_get_expr(object, bracket, index),
+            Expr::IndexSet {
+                object,
+                bracket,
+                index,
+                value,
+            } => visitor.visit_index_set_expr(object, bracket, index, value),
+            Expr::IndexSetModify {
+                object,
+                bracket,
+                index,
+                operator,
+                value,
+            } => visitor.visit_index_set_modify_expr(object, bracket, index, operator, value),
         }
     }
 }
@@ -249,7 +309,11 @@ impl fmt::Display for Expr {
                 operator,
                 value,
             } => {
-                write!(f, "({} (. {} {}) {})", operator.lexeme, object, name.lexeme, value)
+                write!(
+                    f,
+                    "({} (. {} {}) {})",
+                    operator.lexeme, object, name.lexeme, value
+                )
             }
             Expr::This { .. } => write!(f, "this"),
             Expr::Super { method, .. } => write!(f, "(super {})", method.lexeme),
@@ -258,6 +322,37 @@ impl fmt::Display for Expr {
                 then_branch,
                 else_branch,
             } => write!(f, "(?: {} {} {})", condition, then_branch, else_branch),
+            Expr::List { elements, .. } => {
+                write!(f, "(list")?;
+                for el in elements {
+                    write!(f, " {}", el)?;
+                }
+                write!(f, ")")
+            }
+            Expr::IndexGet { object, index, .. } => {
+                write!(f, "([] {} {})", object, index)
+            }
+            Expr::IndexSet {
+                object,
+                index,
+                value,
+                ..
+            } => {
+                write!(f, "(= ([] {} {}) {})", object, index, value)
+            }
+            Expr::IndexSetModify {
+                object,
+                index,
+                operator,
+                value,
+                ..
+            } => {
+                write!(
+                    f,
+                    "({} ([] {} {}) {})",
+                    operator.lexeme, object, index, value
+                )
+            }
         }
     }
 }

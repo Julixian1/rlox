@@ -1,3 +1,5 @@
+//! Punto de entrada por línea de comandos (CLI) y REPL de `rlox`.
+
 use rlox::checker;
 use rlox::compiler::reg::{codegen, vm::RegVm};
 use rlox::compiler::{
@@ -14,13 +16,18 @@ use std::env;
 use std::fs;
 use std::io::{self, Write};
 
+/// Representa el motor de ejecución seleccionado por el usuario en la línea de comandos.
 enum Backend {
+    /// Intérprete directo sobre el AST (Tree-Walk).
     TreeWalk(Interpreter),
+    /// Máquina virtual basada en pila con soporte de optimizaciones de bytecode.
     Bytecode(Vm<io::Stdout>, OptConfig),
+    /// Máquina virtual basada en registros.
     Register(RegVm<io::Stdout>),
 }
 
 impl Backend {
+    /// Ejecuta una cadena de código fuente en el backend seleccionado, procesando errores en caso de fallo.
     fn run(&mut self, source: String) {
         let statements = match parse_and_check(source) {
             Some(statements) => statements,
@@ -77,6 +84,7 @@ impl Backend {
     }
 }
 
+/// Realiza el escaneo de tokens, parseo sintáctico y chequeo semántico del código fuente.
 fn parse_and_check(source: String) -> Option<Vec<Stmt>> {
     let mut scanner = Scanner::new(source);
     let tokens = match scanner.scan_tokens() {
@@ -107,11 +115,12 @@ fn parse_and_check(source: String) -> Option<Vec<Stmt>> {
     Some(statements)
 }
 
+/// Punto de entrada del binario ejecutable. Procesa argumentos CLI y delega la ejecución al backend correspondiente.
 fn main() {
     let raw_args: Vec<String> = env::args().skip(1).collect();
     let mut use_vm = false;
     let mut use_reg = false;
-    let mut opt_config = OptConfig::default(); // default -O0
+    let mut opt_config = OptConfig::default();
     let mut opt_flags_specified = Vec::new();
     let mut positional_args = Vec::new();
 

@@ -1,23 +1,36 @@
+//! Implementación del algoritmo de análisis sintáctico de Pratt para expresiones según precedencia.
+
 use super::Parser;
 use crate::expr::{Expr, LiteralValue};
 use crate::token::{Literal, TokenType};
- 
-/// De menor a mayor. El orden de las variantes ES la precedencia.
+
+/// Niveles de precedencia de operadores para el parser de Pratt, ordenados de menor a mayor.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Precedence {
+    /// Nivel más bajo de precedencia.
     Lowest,
+    /// Operador condicional ternario `?:`.
     Ternary,
+    /// Operador lógico `or`.
     Or,
+    /// Operador lógico `and`.
     And,
+    /// Operadores de igualdad `==` y `!=`.
     Equality,
+    /// Operadores de comparación `<`, `<=`, `>`, `>=`.
     Comparison,
+    /// Términos de suma y resta `+`, `-`.
     Term,
+    /// Factores de multiplicación, división y módulo `*`, `/`, `%`.
     Factor,
+    /// Operadores unarios prefijos `!`, `-`.
     Unary,
+    /// Llamadas a función y accesos por propiedad o índice `()`, `.`, `[]`.
     Call,
 }
- 
+
 impl Precedence {
+    /// Retorna el siguiente nivel de precedencia para imponer asociatividad a izquierda.
     fn next(self) -> Self {
         use Precedence::*;
         match self {
@@ -33,16 +46,21 @@ impl Precedence {
         }
     }
 }
- 
+
 type PrefixFn = fn(&mut Parser) -> Result<Expr, String>;
 type InfixFn = fn(&mut Parser, Expr) -> Result<Expr, String>;
- 
+
+/// Regla de análisis sintáctico de Pratt que asocia funciones prefijas e infijas con un nivel de precedencia.
 struct ParseRule {
+    /// Función de análisis para cuando el token aparece en posición prefija.
     prefix: Option<PrefixFn>,
+    /// Función de análisis para cuando el token aparece en posición infija.
     infix: Option<InfixFn>,
+    /// Nivel de precedencia asignado al token.
     precedence: Precedence,
 }
- 
+
+/// Construye una nueva regla de parseo de Pratt.
 fn rule(prefix: Option<PrefixFn>, infix: Option<InfixFn>, precedence: Precedence) -> ParseRule {
     ParseRule {
         prefix,
@@ -50,7 +68,8 @@ fn rule(prefix: Option<PrefixFn>, infix: Option<InfixFn>, precedence: Precedence
         precedence,
     }
 }
- 
+
+/// Retorna la regla de análisis de Pratt correspondiente a un tipo de token léxico.
 #[rustfmt::skip]
 fn get_rule(t: &TokenType) -> ParseRule {
     use Precedence as P;
@@ -58,6 +77,8 @@ fn get_rule(t: &TokenType) -> ParseRule {
     //                                    prefix                      infix                    precedence
     match t {
         T::LeftParen                  => rule(Some(Parser::grouping), Some(Parser::finish_call), P::Call),
+        T::LeftBracket                => rule(Some(Parser::list_literal), Some(Parser::finish_index), P::Call),
+        T::RightBracket               => rule(None,                   None,                      P::Lowest),
         T::Dot                        => rule(None,                   Some(Parser::dot),         P::Call),
         T::Number | T::String         => rule(Some(Parser::value),    None,                      P::Lowest),
         T::Nil | T::True | T::False   => rule(Some(Parser::literal),  None,                      P::Lowest),
@@ -79,7 +100,7 @@ fn get_rule(t: &TokenType) -> ParseRule {
         _                             => rule(None,                   None,                      P::Lowest),
     }
 }
- 
+
 impl Parser {
     /// Parsea una expresión cuyos operadores tengan precedencia >= `min`.
     pub(super) fn parse_precedence(&mut self, min: Precedence) -> Result<Expr, String> {
@@ -92,7 +113,7 @@ impl Parser {
         };
         self.advance();
         let mut left = prefix(self)?;
- 
+
         while min <= get_rule(&self.peek().token_type).precedence {
             self.advance();
             let infix = get_rule(&self.previous().token_type)
@@ -102,9 +123,8 @@ impl Parser {
         }
         Ok(left)
     }
- 
-    // ---- prefix: el token ya fue consumido y está en previous() ----
- 
+
+    /// Parsea una expresión agrupada entre paréntesis.
     fn grouping(&mut self) -> Result<Expr, String> {
         let expr = self.expression()?;
         self.consume(&TokenType::RightParen, "Expected ')' after expression.")?;
@@ -112,7 +132,8 @@ impl Parser {
             expression: Box::new(expr),
         })
     }
- 
+
+    /// Parsea un literal numérico o una cadena de texto.
     fn value(&mut self) -> Result<Expr, String> {
         let token = self.previous().clone();
         match token.literal {
@@ -125,7 +146,8 @@ impl Parser {
             _ => Err(format!("[line {}] Error: Invalid literal.", token.line)),
         }
     }
- 
+
+    /// Parsea un literal booleano (`true`, `false`) o `nil`.
     fn literal(&mut self) -> Result<Expr, String> {
         let value = match self.previous().token_type {
             TokenType::True => LiteralValue::Bool(true),
@@ -134,26 +156,30 @@ impl Parser {
         };
         Ok(Expr::Literal { value })
     }
- 
+
+    /// Parsea una referencia a variable por su identificador.
     fn variable(&mut self) -> Result<Expr, String> {
         Ok(Expr::Variable {
             name: self.previous().clone(),
         })
     }
- 
+
+    /// Parsea una referencia a la instancia receptora actual (`this`).
     fn this_expr(&mut self) -> Result<Expr, String> {
         Ok(Expr::This {
             keyword: self.previous().clone(),
         })
     }
- 
+
+    /// Parsea una referencia a método de la superclase (`super.method`).
     fn super_expr(&mut self) -> Result<Expr, String> {
         let keyword = self.previous().clone();
         self.consume(&TokenType::Dot, "Expected '.' after 'super'.")?;
         let method = self.consume(&TokenType::Identifier, "Expected superclass method name.")?;
         Ok(Expr::Super { keyword, method })
     }
- 
+
+    /// Parsea una operación unaria prefija (`-expr`, `!expr`).
     fn unary(&mut self) -> Result<Expr, String> {
         let operator = self.previous().clone();
         let right = self.parse_precedence(Precedence::Unary)?;
@@ -162,20 +188,20 @@ impl Parser {
             right: Box::new(right),
         })
     }
- 
-    // ---- infix: el operador está en previous(), el lado izquierdo ya está parseado ----
- 
+
+    /// Parsea una operación binaria infija asociativa a izquierda.
     fn binary(&mut self, left: Expr) -> Result<Expr, String> {
         let operator = self.previous().clone();
         let prec = get_rule(&operator.token_type).precedence;
-        let right = self.parse_precedence(prec.next())?; // next() => asociatividad a izquierda
+        let right = self.parse_precedence(prec.next())?;
         Ok(Expr::Binary {
             left: Box::new(left),
             operator,
             right: Box::new(right),
         })
     }
- 
+
+    /// Parsea una operación lógica infija (`and`, `or`).
     fn logical(&mut self, left: Expr) -> Result<Expr, String> {
         let operator = self.previous().clone();
         let prec = get_rule(&operator.token_type).precedence;
@@ -186,7 +212,8 @@ impl Parser {
             right: Box::new(right),
         })
     }
- 
+
+    /// Parsea el acceso a una propiedad de objeto mediante operador punto (`object.prop`).
     fn dot(&mut self, left: Expr) -> Result<Expr, String> {
         let name = self.consume(&TokenType::Identifier, "Expected property name after '.'.")?;
         Ok(Expr::Get {
@@ -195,6 +222,7 @@ impl Parser {
         })
     }
 
+    /// Parsea una expresión condicional ternaria (`condition ? then_branch : else_branch`).
     fn ternary(&mut self, condition: Expr) -> Result<Expr, String> {
         let then_branch = self.expression()?;
         self.consume(
@@ -209,4 +237,3 @@ impl Parser {
         })
     }
 }
- 

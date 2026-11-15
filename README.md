@@ -669,3 +669,93 @@ En la comparación global, `Stack VM -O2 (Release)` fue **~62,9× más rápida**
 - Son microbenchmarks y no representan todos los programas posibles.
 - La VM de registros no soporta clases ni herencia.
 
+## Funcionalidades extras
+
+### Operadores compuestos y extras
+
+Se incorporaron operadores adicionales para enriquecer la expresividad aritmética y condicional de Lox:
+
+* **Operador módulo (`%`):** Permite calcular el resto de la división entre números enteros o decimales.
+* **Asignaciones compuestas (`+=`, `-=`, `*=`, `/=`, `%=`):** Permiten actualizar de forma concisa variables, propiedades de instancias (`obj.prop += valor`) y elementos de listas (`arr[i] += valor`), evaluando el destino exactamente una vez.
+* **Operador ternario (`? :`):** Permite seleccionar entre dos expresiones según una condición booleana (`condicion ? si_verdadero : si_falso`), con evaluación por cortocircuito (*short-circuit*).
+
+```lox
+// Modulo
+var resto = 17 % 5; // 2
+
+// Asignaciones compuestas
+var contador = 10;
+contador += 5; // 15
+contador *= 2; // 30
+contador %= 7; // 2
+
+// Operador ternario
+var edad = 20;
+var estado = edad >= 18 ? "Mayor" : "Menor"; // "Mayor"
+```
+
+### Control de flujo en bucles
+
+Se agregaron sentencias de salto estructurado para bucles:
+
+* **`break`:** Finaliza inmediatamente la ejecución del bucle envolvente más cercano.
+* **`continue`:** Interrumpe la iteración en curso y salta directamente a la siguiente iteración (ejecutando la cláusula de incremento en bucles `for`).
+
+Ambas instrucciones son compatibles tanto con `while` como con `for`, y pueden combinarse con estructuras de control anidadas.
+
+```lox
+var suma = 0;
+
+for (var i = 0; i < 10; i += 1) {
+  if (i == 2) {
+    continue; // Salta la iteracion cuando i es 2
+  }
+  if (i == 6) {
+    break; // Termina el bucle cuando i llega a 6
+  }
+  suma += i;
+}
+
+print suma; // 0 + 1 + 3 + 4 + 5 = 13
+```
+
+### Listas / Arrays nativos
+
+Lox cuenta con soporte para colecciones dinámicas y heterogéneas de valores:
+
+* **Literales:** Creación de listas vacías `[]` o con elementos heterogéneos `[1, "hola", true, nil]`.
+* **Indexación y modificación:** Acceso a elementos con `arr[i]` y asignación in-place con `arr[i] = valor`. Los índices válidos son números enteros no negativos que comienzan en `0`; el uso de índices negativos, números con parte decimal o posiciones fuera de rango (`0 <= i < len`) produce un error de runtime.
+* **Asignaciones compuestas sobre índices:** Modificación directa mediante `arr[i] += valor`, garantizando la evaluación única del receptor y del índice.
+* **Listas anidadas:** Soporte para estructuras multidimensionales (como matrices) mediante indexación encadenada `matriz[i][j]`.
+* **Semántica de referencia compartida:** Las listas son mutables y se comparten por referencia (*aliasing*), de modo que reasignar o pasar una lista a una función no clona los datos.
+* **Funciones nativas:**
+  * `len(lista)`: Devuelve la cantidad de elementos de la lista.
+  * `push(lista, valor)`: Inserta un elemento al final de la lista y devuelve `nil`.
+  * `pop(lista)`: Extrae y devuelve el último elemento de la lista (produce un error de runtime si la lista está vacía).
+
+```lox
+// Creacion y mutabilidad
+var numeros = [10, 20, 30];
+push(numeros, 40);
+
+print len(numeros); // 4
+print pop(numeros); // 40
+
+numeros[0] += 5;
+print numeros[0];   // 15
+
+// Referencia compartida
+var alias = numeros;
+alias[1] = 99;
+print numeros[1];   // 99
+
+// Listas anidadas
+var matriz = [[1, 2], [3, 4]];
+print matriz[1][0]; // 3
+```
+
+Para consultar programas completos utilizando listas (como algoritmos de ordenamiento in-place, pilas LIFO y operaciones sobre matrices bidimensionales), véase el directorio `examples/lists/`.
+
+Los tres grupos de funcionalidades adicionales están plenamente implementados y verificados en todos los backends del intérprete: Tree-Walk, Stack VM (en niveles `-O0`, `-O1` y `-O2`) y Register VM.
+
+

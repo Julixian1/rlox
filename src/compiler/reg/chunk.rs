@@ -1,71 +1,100 @@
+//! Instrucciones de bytecode basado en registros (`RegOp`) y estructura del chunk (`RegChunk`).
+
 use crate::value::Value;
 
-/// Error cuando algo no entra en el operando (demasiadas constantes, salto muy largo).
+/// Error emitido cuando un operando excede el tamaño máximo representable (constantes o saltos).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TooLarge;
 
-/// Instrucciones de la VM de registros.
+/// Instrucciones de la máquina virtual basada en registros.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RegOp {
-    // Cargas
-    LoadK(u8, u16),    // dst, const
-    LoadNil(u8),       // dst
-    LoadBool(u8, bool), // dst, valor
-    Move(u8, u8),      // dst, src
+    /// Carga una constante desde el pool en el registro de destino.
+    LoadK(u8, u16),
+    /// Carga el valor `nil` en el registro de destino.
+    LoadNil(u8),
+    /// Carga un valor booleano en el registro de destino.
+    LoadBool(u8, bool),
+    /// Copia el valor de un registro origen a un registro destino.
+    Move(u8, u8),
 
-    // Aritmética: dst, izquierda, derecha
+    /// Suma los valores de dos registros y almacena el resultado en el registro destino.
     Add(u8, u8, u8),
+    /// Resta los valores de dos registros y almacena el resultado en el registro destino.
     Sub(u8, u8, u8),
+    /// Multiplica los valores de dos registros y almacena el resultado en el registro destino.
     Mul(u8, u8, u8),
+    /// Divide los valores de dos registros y almacena el resultado en el registro destino.
     Div(u8, u8, u8),
+    /// Calcula el módulo entre dos registros y almacena el resultado en el registro destino.
     Mod(u8, u8, u8),
 
-    // Unarias: dst, src
+    /// Aplica la negación aritmética sobre un registro y almacena en el destino.
     Neg(u8, u8),
+    /// Aplica la negación lógica sobre un registro y almacena en el destino.
     Not(u8, u8),
 
-    // Comparaciones: dejan un booleano en dst
+    /// Compara igualdad entre dos registros dejando un booleano en el destino.
     Eq(u8, u8, u8),
+    /// Compara si el primer registro es menor que el segundo dejando un booleano en el destino.
     Lt(u8, u8, u8),
+    /// Compara si el primer registro es menor o igual que el segundo dejando un booleano en el destino.
     Le(u8, u8, u8),
 
-    // Saltos 
+    /// Salto incondicional relativo hacia adelante.
     Jump(u16),
-    JumpIfFalse(u8, u16), 
+    /// Salto condicional relativo hacia adelante si el registro evaluado es falso.
+    JumpIfFalse(u8, u16),
+    /// Salto incondicional relativo hacia atrás en un bucle.
     Loop(u16),
 
-    // Globales
-    GetGlobal(u8, u16),    
-    SetGlobal(u16, u8),   
-    DefineGlobal(u16, u8), 
+    /// Lee una variable global desde la tabla de constantes y la carga en el registro destino.
+    GetGlobal(u8, u16),
+    /// Asigna el valor de un registro a una variable global existente.
+    SetGlobal(u16, u8),
+    /// Define una nueva variable global a partir del valor de un registro.
+    DefineGlobal(u16, u8),
 
-    // Funciones
-    /// Llama a la función del registro `a` con `n` argumentos, que están en
-    /// `a+1..=a+n`. El resultado queda en `a`.
-    Call(u8, u8), // a, n
+    /// Llama a la función del registro base con `n` argumentos contiguos (`base+1..=base+n`).
+    Call(u8, u8),
+    /// Retorna de la función actual devolviendo el valor del registro indicado.
     Return(u8),
 
-    // Closures
-    Closure(u8, u16),    // dst, const (RegProto)
-    GetUpvalue(u8, u16), // dst, índice de upvalue
-    SetUpvalue(u16, u8), // índice de upvalue, src
-    /// Cierra los upvalues abiertos sobre el registro dado o los de arriba.
+    /// Instancia una clausura a partir del prototipo en constantes y la asigna al registro destino.
+    Closure(u8, u16),
+    /// Obtiene el valor de una variable capturada (upvalue) y lo almacena en el registro destino.
+    GetUpvalue(u8, u16),
+    /// Modifica el valor de una variable capturada (upvalue) con el contenido del registro origen.
+    SetUpvalue(u16, u8),
+    /// Cierra todos los upvalues abiertos en el registro indicado o superiores.
     Close(u8),
 
-    // Otros
+    /// Construye una lista a partir de una secuencia contigua de registros y la asigna a destino.
+    BuildList(u8, u8, u16),
+    /// Indexa una lista almacenada en un registro mediante el registro de índice y guarda en destino.
+    GetIndex(u8, u8, u8),
+    /// Asigna un elemento en una lista indexada utilizando tres registros (lista, índice, valor).
+    SetIndex(u8, u8, u8),
+
+    /// Imprime en la salida estándar el valor almacenado en el registro indicado.
     Print(u8),
 }
 
+/// Fragmento de código compilado para la Register VM.
 #[derive(Default)]
 pub struct RegChunk {
+    /// Vector de instrucciones de bytecode basadas en registros.
     pub code: Vec<RegOp>,
+    /// Número de línea del código fuente correspondiente a cada instrucción.
     pub lines: Vec<usize>,
+    /// Tabla de constantes asociadas a este fragmento.
     pub constants: Vec<Value>,
     /// Cantidad de registros que necesita la función (para reservar el stack).
     pub max_regs: usize,
 }
 
 impl RegChunk {
+    /// Crea un nuevo fragmento de código vacío para la Register VM.
     pub fn new() -> Self {
         Self::default()
     }
@@ -105,8 +134,6 @@ impl RegChunk {
         Ok(())
     }
 
-    // ---- disassembler ---------------------------------------------------
-
     /// Devuelve el bytecode legible, una instrucción por línea.
     pub fn disassemble(&self, name: &str) -> String {
         let mut out = format!("== {name} ==\n");
@@ -129,10 +156,12 @@ impl RegChunk {
         out
     }
 
+    /// Formatea una constante de la tabla según su índice.
     fn constant(&self, k: u16) -> String {
         format!("{}", self.constants[k as usize])
     }
 
+    /// Genera el nemónico y texto descriptivo de los operandos de una instrucción.
     fn describe(&self, at: usize, op: RegOp) -> (&'static str, String) {
         use RegOp::*;
         match op {
@@ -164,6 +193,10 @@ impl RegChunk {
 
             Print(r) => ("Print", format!("r{r}")),
             Return(r) => ("Return", format!("r{r}")),
+
+            BuildList(d, start, n) => ("BuildList", format!("r{d} r{start}.. {n} el(s)")),
+            GetIndex(d, l, i) => ("GetIndex", format!("r{d} r{l}[r{i}]")),
+            SetIndex(l, i, s) => ("SetIndex", format!("r{l}[r{i}] = r{s}")),
 
             Call(a, n) => ("Call", format!("r{a} {n} arg(s)")),
             Close(r) => ("Close", format!("r{r}")),

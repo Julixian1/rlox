@@ -1,3 +1,5 @@
+//! Intérprete Tree-Walk de Lox con resolución de variables y ejecución directa del AST.
+
 pub mod checker;
 pub mod environment;
 pub mod resolver;
@@ -15,10 +17,15 @@ use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::{Token, TokenType};
 use crate::value::Value;
 
+/// Intérprete del lenguaje Lox que ejecuta sentencias y evalúa expresiones directamente sobre el AST.
 pub struct Interpreter {
+    /// Entorno global raíz donde residen las variables globales y funciones nativas.
     pub globals: Rc<RefCell<Environment>>,
+    /// Entorno léxico actualmente activo para la evaluación y resolución de variables.
     environment: Rc<RefCell<Environment>>,
+    /// Tabla que asocia cada puntero de nodo expresión con su distancia léxica resuelta.
     locals: HashMap<*const Expr, usize>,
+    /// Flujo de salida utilizado para emitir mensajes (por defecto `io::stdout()`).
     out: Box<dyn Write + Send>,
 }
 
@@ -33,6 +40,30 @@ impl Interpreter {
     /// Crea un nuevo `Interpreter` con un escritor inyectado para capturar la salida de print.
     pub fn with_output<W: Write + Send + 'static>(out: W) -> Self {
         let globals = Rc::new(RefCell::new(Environment::new()));
+        globals.borrow_mut().define(
+            "len".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "len".to_string(),
+                arity: 1,
+                func: crate::value::native_len,
+            })),
+        );
+        globals.borrow_mut().define(
+            "push".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "push".to_string(),
+                arity: 2,
+                func: crate::value::native_push,
+            })),
+        );
+        globals.borrow_mut().define(
+            "pop".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "pop".to_string(),
+                arity: 1,
+                func: crate::value::native_pop,
+            })),
+        );
         Interpreter {
             globals: globals.clone(),
             environment: globals,
@@ -55,9 +86,7 @@ impl Interpreter {
                     ReturnSignal::Return(_) => {
                         Err("Cannot return from top-level code.".to_string())
                     }
-                    ReturnSignal::Break => {
-                        Err("Cannot break from top-level code.".to_string())
-                    }
+                    ReturnSignal::Break => Err("Cannot break from top-level code.".to_string()),
                     ReturnSignal::Continue => {
                         Err("Cannot continue from top-level code.".to_string())
                     }
@@ -200,18 +229,10 @@ impl Interpreter {
                     operator.line
                 ))),
             },
-            TokenType::MinusEqual => {
-                self.num_binary_op(left, right, operator.line, |a, b| a - b)
-            }
-            TokenType::StarEqual => {
-                self.num_binary_op(left, right, operator.line, |a, b| a * b)
-            }
-            TokenType::SlashEqual => {
-                self.num_binary_op(left, right, operator.line, |a, b| a / b)
-            }
-            TokenType::PercentEqual => {
-                self.num_binary_op(left, right, operator.line, |a, b| a % b)
-            }
+            TokenType::MinusEqual => self.num_binary_op(left, right, operator.line, |a, b| a - b),
+            TokenType::StarEqual => self.num_binary_op(left, right, operator.line, |a, b| a * b),
+            TokenType::SlashEqual => self.num_binary_op(left, right, operator.line, |a, b| a / b),
+            TokenType::PercentEqual => self.num_binary_op(left, right, operator.line, |a, b| a % b),
             _ => Err(ReturnSignal::Error(format!(
                 "[line {}] Invalid compound assignment operator.",
                 operator.line
@@ -368,12 +389,10 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
         superclass: &Option<Expr>,
         methods: &[Stmt],
     ) -> Result<(), ReturnSignal> {
-        // 1. Placeholder del nombre en el entorno actual
         self.environment
             .borrow_mut()
             .define(name.lexeme.clone(), Value::Nil);
 
-        // 2. Evaluar y validar la superclase (si existe)
         let evaluated_superclass = if let Some(superclass_expr) = superclass {
             let superclass_token = match superclass_expr {
                 Expr::Variable { name } => name,
@@ -393,7 +412,6 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
             None
         };
 
-        // 3. Creación del entorno léxico de 'super' (si es subclase)
         let superclass_env = if let Some(ref super_rc) = evaluated_superclass {
             let env = Rc::new(RefCell::new(Environment::new_enclosed(
                 self.environment.clone(),
@@ -405,7 +423,6 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
             None
         };
 
-        // 4. Compilación de métodos con la clausura correspondiente
         let method_closure = superclass_env.as_ref().unwrap_or(&self.environment).clone();
         let mut methods_map = HashMap::new();
         for method in methods {
@@ -427,10 +444,8 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
             }
         }
 
-        // 5. Instanciar la clase LoxClass
         let klass = LoxClass::new(name.lexeme.clone(), evaluated_superclass, methods_map);
 
-        // 6. Asignar la clase final reemplazando el placeholder
         self.environment
             .borrow_mut()
             .assign(name, Value::Class(Rc::new(RefCell::new(klass))))
@@ -592,6 +607,19 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
 
                 Ok(Value::Instance(instance))
             }
+            Value::NativeFn(native) => {
+                if args_val.len() != native.arity {
+                    return Err(ReturnSignal::Error(format!(
+                        "[line {}] Expected {} arguments but got {}.",
+                        paren.line,
+                        native.arity,
+                        args_val.len()
+                    )));
+                }
+
+                (native.func)(&args_val)
+                    .map_err(|msg| ReturnSignal::Error(format!("[line {}] {}", paren.line, msg)))
+            }
             _ => Err(ReturnSignal::Error(format!(
                 "[line {}] Can only call functions and classes.",
                 paren.line
@@ -661,7 +689,9 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             })?;
             let rhs = self.evaluate(value)?;
             let new_val = self.apply_compound_op(operator, current, rhs)?;
-            instance.borrow_mut().set(name.lexeme.clone(), new_val.clone());
+            instance
+                .borrow_mut()
+                .set(name.lexeme.clone(), new_val.clone());
             Ok(new_val)
         } else {
             Err(ReturnSignal::Error(format!(
@@ -689,7 +719,6 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             ))
         })?;
 
-        // 1. Obtener superclase a la distancia resuelta
         let superclass_val = self
             .environment
             .borrow()
@@ -705,7 +734,6 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             }
         };
 
-        // 2. Obtener la instancia ('this') exactamente un nivel más cerca (distance - 1)
         let this_distance = distance.checked_sub(1).ok_or_else(|| {
             ReturnSignal::Error(format!(
                 "[line {}] Internal error: invalid lexical distance for 'super'.",
@@ -727,7 +755,6 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             }
         };
 
-        // 3. Buscar método en la superclase (búsqueda recursiva)
         let method_fn = superclass
             .borrow()
             .find_method(&method.lexeme)
@@ -738,7 +765,6 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
                 ))
             })?;
 
-        // 4. Ligar a la instancia receptora
         Ok(Value::Function(Rc::new(method_fn.bind(instance))))
     }
 
@@ -754,5 +780,97 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
         } else {
             self.evaluate(else_branch)
         }
+    }
+
+    fn visit_list_expr(
+        &mut self,
+        _bracket: &Token,
+        elements: &[Expr],
+    ) -> Result<Value, ReturnSignal> {
+        let mut list = Vec::with_capacity(elements.len());
+        for el in elements {
+            list.push(self.evaluate(el)?);
+        }
+        Ok(Value::List(Rc::new(RefCell::new(list))))
+    }
+
+    fn visit_index_get_expr(
+        &mut self,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+    ) -> Result<Value, ReturnSignal> {
+        let obj = self.evaluate(object)?;
+        let idx = self.evaluate(index)?;
+        match obj {
+            Value::List(l) => {
+                let items = l.borrow();
+                let i = crate::value::validate_list_index(items.len(), &idx).map_err(|msg| {
+                    ReturnSignal::Error(format!("[line {}] {}", bracket.line, msg))
+                })?;
+                Ok(items[i].clone())
+            }
+            _ => Err(ReturnSignal::Error(format!(
+                "[line {}] Only lists can be indexed.",
+                bracket.line
+            ))),
+        }
+    }
+
+    fn visit_index_set_expr(
+        &mut self,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+        value: &Expr,
+    ) -> Result<Value, ReturnSignal> {
+        let obj = self.evaluate(object)?;
+        let idx = self.evaluate(index)?;
+        let val = self.evaluate(value)?;
+        match obj {
+            Value::List(l) => {
+                let mut items = l.borrow_mut();
+                let i = crate::value::validate_list_index(items.len(), &idx).map_err(|msg| {
+                    ReturnSignal::Error(format!("[line {}] {}", bracket.line, msg))
+                })?;
+                items[i] = val.clone();
+                Ok(val)
+            }
+            _ => Err(ReturnSignal::Error(format!(
+                "[line {}] Only lists can be indexed.",
+                bracket.line
+            ))),
+        }
+    }
+
+    fn visit_index_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        bracket: &Token,
+        index: &Expr,
+        operator: &Token,
+        value: &Expr,
+    ) -> Result<Value, ReturnSignal> {
+        let obj = self.evaluate(object)?;
+        let idx = self.evaluate(index)?;
+        let list = match obj {
+            Value::List(l) => l,
+            _ => {
+                return Err(ReturnSignal::Error(format!(
+                    "[line {}] Only lists can be indexed.",
+                    bracket.line
+                )));
+            }
+        };
+        let (i, cur_val) = {
+            let items = list.borrow();
+            let i = crate::value::validate_list_index(items.len(), &idx)
+                .map_err(|msg| ReturnSignal::Error(format!("[line {}] {}", bracket.line, msg)))?;
+            (i, items[i].clone())
+        };
+        let val = self.evaluate(value)?;
+        let new_val = self.apply_compound_op(operator, cur_val, val)?;
+        list.borrow_mut()[i] = new_val.clone();
+        Ok(new_val)
     }
 }

@@ -1,42 +1,59 @@
+//! Generador de código (codegen) del AST a bytecode basado en registros para la Register VM.
+
 use super::chunk::{RegChunk, RegOp};
+use super::closure::RegProto;
+use crate::closure::UpvalueDesc;
 use crate::expr::{Expr, LiteralValue};
 use crate::stmt::Stmt;
 use crate::token::{Token, TokenType};
-use super::closure::RegProto;
-use crate::closure::UpvalueDesc;
 use crate::value::Value;
 use std::rc::Rc;
 
 type CResult = Result<(), String>;
 
-/// Un local vive en el registro que coincide con su posición en `locals`.
+/// Variable local activa asociada a un registro virtual coincidente con su índice.
 struct Local {
+    /// Nombre identificador de la variable local.
     name: String,
+    /// Profundidad del bloque de ámbito léxico.
     depth: usize,
+    /// Indica si la variable local fue capturada como upvalue por una clausura interna.
     captured: bool,
 }
 
+/// Contexto de control de bucles activos (`while` y `for`) en el compilador de registros.
 #[derive(Clone)]
 struct RegLoopContext {
+    /// Profundidad de ámbito en la que se inició el bucle.
     scope_depth: usize,
+    /// Desplazamientos de saltos pendientes generados por sentencias `break`.
     break_jumps: Vec<usize>,
+    /// Desplazamientos de saltos pendientes generados por sentencias `continue`.
     continue_jumps: Vec<usize>,
 }
 
-/// Estado de la función que se está compilando.
+/// Estado de compilación y asignación de registros para una función o script.
 struct FnState {
+    /// Nombre opcional de la función.
     name: Option<String>,
+    /// Cantidad de parámetros formales de la función.
     arity: usize,
+    /// Fragmento de código compilado en construcción.
     chunk: RegChunk,
+    /// Variables locales activas mapeadas a registros iniciales.
     locals: Vec<Local>,
+    /// Descriptores de variables capturadas (upvalues).
     upvalues: Vec<UpvalueDesc>,
+    /// Profundidad actual del ámbito léxico.
     scope_depth: usize,
     /// Primer registro libre. Los registros `0..locals.len()` son locales.
     free_reg: usize,
+    /// Pila de contextos de bucle anidados activos en la función.
     loop_contexts: Vec<RegLoopContext>,
 }
 
 impl FnState {
+    /// Inicializa un nuevo estado de compilación para una función o script.
     fn new(name: Option<String>, scope_depth: usize) -> Self {
         FnState {
             name,
@@ -50,6 +67,7 @@ impl FnState {
         }
     }
 
+    /// Registra un nuevo upvalue en el prototipo o reutiliza uno existente.
     fn add_upvalue(&mut self, desc: UpvalueDesc) -> u16 {
         match self.upvalues.iter().position(|u| *u == desc) {
             Some(i) => i as u16,
@@ -60,6 +78,7 @@ impl FnState {
         }
     }
 
+    /// Consume el estado convirtiéndolo en un `RegProto` finalizado.
     fn into_proto(self) -> RegProto {
         RegProto {
             name: self.name,
@@ -70,17 +89,23 @@ impl FnState {
     }
 }
 
+/// Compilador que traduce el AST a instrucciones de bytecode basadas en registros.
 struct RegCompiler {
+    /// Estado de compilación de la función actualmente en procesamiento.
     st: FnState,
+    /// Pila de estados de funciones envolventes (padres).
     enclosing: Vec<FnState>,
+    /// Número de línea del código fuente actual.
     line: usize,
 }
 
+/// Compila una secuencia de sentencias del AST en un prototipo ejecutable para la Register VM.
 pub fn compile(statements: &[Stmt]) -> Result<Rc<RegProto>, String> {
     RegCompiler::new().compile(statements)
 }
 
 impl RegCompiler {
+    /// Crea un nuevo compilador de registros para el script principal.
     fn new() -> Self {
         RegCompiler {
             st: FnState::new(None, 0),
@@ -89,6 +114,7 @@ impl RegCompiler {
         }
     }
 
+    /// Compila todas las sentencias emitiendo un retorno implícito al finalizar.
     fn compile(mut self, statements: &[Stmt]) -> Result<Rc<RegProto>, String> {
         for stmt in statements {
             self.stmt(stmt)?;
@@ -97,6 +123,7 @@ impl RegCompiler {
         Ok(Rc::new(self.st.into_proto()))
     }
 
+    /// Emite la carga de `nil` y la instrucción de retorno final.
     fn emit_implicit_return(&mut self) -> CResult {
         let r = self.alloc_reg()?;
         self.emit(RegOp::LoadNil(r));
@@ -104,17 +131,18 @@ impl RegCompiler {
         Ok(())
     }
 
-    // ---- helpers de emisión --------------------------------------------
-
+    /// Añade una instrucción de registro al chunk actual registrando la línea.
     fn emit(&mut self, op: RegOp) -> usize {
         let line = self.line;
         self.st.chunk.write(op, line)
     }
 
+    /// Formatea un mensaje de error asociándolo a la línea actual.
     fn error(&self, msg: &str) -> String {
         format!("[line {}] Error: {}", self.line, msg)
     }
 
+    /// Agrega una constante al chunk actual retornando su índice.
     fn make_constant(&mut self, value: Value) -> Result<u16, String> {
         let result = self.st.chunk.add_constant(value);
         result.map_err(|_| self.error("Too many constants in one chunk."))
@@ -122,7 +150,8 @@ impl RegCompiler {
 
     fn identifier_constant(&mut self, name: &str) -> Result<u16, String> {
         let existing = self
-            .st.chunk
+            .st
+            .chunk
             .constants
             .iter()
             .position(|c| matches!(c, Value::String(s) if s == name));
@@ -148,8 +177,6 @@ impl RegCompiler {
         result.map_err(|_| self.error("Loop body too large."))
     }
 
-    // ---- registros y scopes --------------------------------------------
-
     fn alloc_reg(&mut self) -> Result<u8, String> {
         if self.st.free_reg > u8::MAX as usize {
             return Err(self.error("Too many registers in one function (max 256)."));
@@ -161,7 +188,8 @@ impl RegCompiler {
     }
 
     fn resolve_local(&self, name: &str) -> Option<u8> {
-        self.st.locals
+        self.st
+            .locals
             .iter()
             .rposition(|l| l.name == name)
             .map(|i| i as u8)
@@ -233,8 +261,6 @@ impl RegCompiler {
         }
         self.st.free_reg = self.st.locals.len();
     }
-
-    // ---- sentencias ------------------------------------------------------
 
     fn stmt(&mut self, s: &Stmt) -> CResult {
         debug_assert_eq!(self.st.free_reg, self.st.locals.len());
@@ -381,7 +407,12 @@ impl RegCompiler {
                 }
 
                 let jump = self.emit_jump(RegOp::Jump(0));
-                self.st.loop_contexts.last_mut().unwrap().break_jumps.push(jump);
+                self.st
+                    .loop_contexts
+                    .last_mut()
+                    .unwrap()
+                    .break_jumps
+                    .push(jump);
                 Ok(())
             }
             Stmt::Continue { keyword } => {
@@ -403,7 +434,12 @@ impl RegCompiler {
                 }
 
                 let jump = self.emit_jump(RegOp::Jump(0));
-                self.st.loop_contexts.last_mut().unwrap().continue_jumps.push(jump);
+                self.st
+                    .loop_contexts
+                    .last_mut()
+                    .unwrap()
+                    .continue_jumps
+                    .push(jump);
                 Ok(())
             }
             Stmt::Function { name, params, body } => self.fun_stmt(name, params, body),
@@ -457,10 +493,7 @@ impl RegCompiler {
 
     /// Compila el cuerpo en un `FnState` nuevo y emite `Closure(dst, k)` en la actual.
     fn function(&mut self, name: &Token, params: &[Token], body: &[Stmt], dst: u8) -> CResult {
-        let outer = std::mem::replace(
-            &mut self.st,
-            FnState::new(Some(name.lexeme.clone()), 1),
-        );
+        let outer = std::mem::replace(&mut self.st, FnState::new(Some(name.lexeme.clone()), 1));
         self.enclosing.push(outer);
 
         let result = self.function_body(params, body);
@@ -554,8 +587,6 @@ impl RegCompiler {
         Ok(())
     }
 
-    // ---- expresiones -------------------------------------------------------
-
     fn operand(&mut self, e: &Expr) -> Result<u8, String> {
         self.operand_before(e, None)
     }
@@ -592,6 +623,11 @@ impl RegCompiler {
             Expr::Grouping { expression } => Self::may_assign(expression),
             Expr::Get { object, .. } => Self::may_assign(object),
             Expr::Set { .. } | Expr::SetModify { .. } => true,
+            Expr::IndexSet { .. } | Expr::IndexSetModify { .. } => true,
+            Expr::IndexGet { object, index, .. } => {
+                Self::may_assign(object) || Self::may_assign(index)
+            }
+            Expr::List { elements, .. } => elements.iter().any(Self::may_assign),
             Expr::Literal { .. }
             | Expr::Variable { .. }
             | Expr::This { .. }
@@ -731,10 +767,8 @@ impl RegCompiler {
                     TokenType::Minus => RegOp::Neg(dst, s),
                     TokenType::Bang => RegOp::Not(dst, s),
                     _ => {
-                        return Err(self.error(&format!(
-                            "Unexpected unary operator '{}'.",
-                            operator.lexeme
-                        )));
+                        return Err(self
+                            .error(&format!("Unexpected unary operator '{}'.", operator.lexeme)));
                     }
                 };
                 self.emit(op);
@@ -829,9 +863,7 @@ impl RegCompiler {
                 Ok(())
             }
 
-            Expr::Get { name, .. }
-            | Expr::Set { name, .. }
-            | Expr::SetModify { name, .. } => {
+            Expr::Get { name, .. } | Expr::Set { name, .. } | Expr::SetModify { name, .. } => {
                 self.line = name.line;
                 Err(self.error("Properties are not supported yet in the register backend."))
             }
@@ -839,6 +871,85 @@ impl RegCompiler {
             Expr::This { keyword } | Expr::Super { keyword, .. } => {
                 self.line = keyword.line;
                 Err(self.error("'this' and 'super' are not supported yet in the register backend."))
+            }
+
+            Expr::List { bracket, elements } => {
+                if elements.is_empty() {
+                    self.line = bracket.line;
+                    self.emit(RegOp::BuildList(dst, 0, 0));
+                } else {
+                    let saved = self.st.free_reg;
+                    let start_reg = self.alloc_reg()?;
+                    for _ in 1..elements.len() {
+                        self.alloc_reg()?;
+                    }
+                    for (i, el) in elements.iter().enumerate() {
+                        self.expr(el, start_reg + i as u8)?;
+                    }
+                    self.line = bracket.line;
+                    self.emit(RegOp::BuildList(dst, start_reg, elements.len() as u16));
+                    self.st.free_reg = saved;
+                }
+                Ok(())
+            }
+
+            Expr::IndexGet {
+                object,
+                bracket,
+                index,
+            } => {
+                let saved = self.st.free_reg;
+                let obj_r = self.operand_before(object, Some(index))?;
+                let idx_r = self.operand(index)?;
+                self.line = bracket.line;
+                self.emit(RegOp::GetIndex(dst, obj_r, idx_r));
+                self.st.free_reg = saved;
+                Ok(())
+            }
+
+            Expr::IndexSet {
+                object,
+                bracket,
+                index,
+                value,
+            } => {
+                let saved = self.st.free_reg;
+                let obj_r = self.operand_before(object, Some(index))?;
+                let idx_r = self.operand_before(index, Some(value))?;
+                let val_r = self.operand(value)?;
+                self.line = bracket.line;
+                self.emit(RegOp::SetIndex(obj_r, idx_r, val_r));
+                if val_r != dst {
+                    self.emit(RegOp::Move(dst, val_r));
+                }
+                self.st.free_reg = saved;
+                Ok(())
+            }
+
+            Expr::IndexSetModify {
+                object,
+                bracket,
+                index,
+                operator,
+                value,
+            } => {
+                let saved = self.st.free_reg;
+                let obj_r = self.operand_before(object, Some(index))?;
+                let idx_r = self.operand_before(index, Some(value))?;
+                let cur_val_r = self.alloc_reg()?;
+                self.line = bracket.line;
+                self.emit(RegOp::GetIndex(cur_val_r, obj_r, idx_r));
+                let val_r = self.operand(value)?;
+                let res_r = self.alloc_reg()?;
+                self.line = operator.line;
+                self.compound_binary_op(operator, res_r, cur_val_r, val_r)?;
+                self.line = bracket.line;
+                self.emit(RegOp::SetIndex(obj_r, idx_r, res_r));
+                if res_r != dst {
+                    self.emit(RegOp::Move(dst, res_r));
+                }
+                self.st.free_reg = saved;
+                Ok(())
             }
         }
     }

@@ -1,98 +1,156 @@
+//! Definición de opcodes, fragmentos de bytecode (`Chunk`) y utilidades de desensamblado para la Stack VM.
+
 use crate::value::Value;
 use std::fmt;
 
+/// Conjunto de instrucciones ejecutables por la máquina virtual basada en pila (Stack VM).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum OpCode {
-    // Literales
-    Constant(u16), // índice en `Chunk::constants`
+    /// Carga una constante desde el pool de constantes en el tope de la pila.
+    Constant(u16),
+    /// Apila el valor `nil`.
     Nil,
+    /// Apila el valor booleano `true`.
     True,
+    /// Apila el valor booleano `false`.
     False,
 
-    // Stack
+    /// Descarta el valor ubicado en el tope de la pila.
     Pop,
+    /// Duplica el valor ubicado en el tope de la pila.
     Dup,
 
-    // Variables
+    /// Carga el valor de una variable local desde la ranura indicada.
     GetLocal(u16),
+    /// Almacena el valor del tope de la pila en la variable local indicada.
     SetLocal(u16),
+    /// Almacena y descarta el valor en la variable local indicada.
     SetLocalPop(u16),
+    /// Obtiene una variable global por nombre.
     GetGlobal(u16),
+    /// Define una nueva variable global por nombre.
     DefineGlobal(u16),
+    /// Asigna un valor a una variable global existente.
     SetGlobal(u16),
+    /// Lectura rápida de variable global mediante índice resuelto.
     GetGlobalFast(u16),
+    /// Escritura rápida de variable global mediante índice resuelto.
     SetGlobalFast(u16),
 
-    // Comparación y aritmética
+    /// Compara igualdad entre los dos operandos superiores.
     Equal,
+    /// Compara si el penúltimo valor es mayor que el tope.
     Greater,
+    /// Compara si el penúltimo valor es menor que el tope.
     Less,
+    /// Compara si el penúltimo valor es mayor o igual que el tope.
     GreaterEqual,
+    /// Compara si el penúltimo valor es menor o igual que el tope.
     LessEqual,
+    /// Suma los dos valores del tope de la pila (o concatena cadenas).
     Add,
+    /// Resta el tope de la pila del penúltimo valor.
     Subtract,
+    /// Multiplica los dos valores superiores de la pila.
     Multiply,
+    /// Divide el penúltimo valor por el tope de la pila.
     Divide,
+    /// Calcula el resto de la división entera (módulo).
     Modulo,
+    /// Aplica la negación lógica (`!`).
     Not,
+    /// Aplica la negación aritmética unaria (`-`).
     Negate,
 
-    // Sentencias y control de flujo
+    /// Imprime en la salida estándar el valor del tope y lo descarta.
     Print,
+    /// Salto incondicional relativo hacia adelante.
     Jump(u16),
+    /// Salto condicional relativo hacia adelante si el tope es falso.
     JumpIfFalse(u16),
+    /// Salto incondicional relativo hacia atrás en un bucle.
     Loop(u16),
 
-    // Funciones
-    Call(u8), // cantidad de argumentos
+    /// Invoca una función o clausura con la cantidad indicada de argumentos.
+    Call(u8),
+    /// Retorna de la función actual.
     Return,
 
-    // Closures
+    /// Crea una clausura a partir del prototipo almacenado en constantes.
     Closure(u16),
+    /// Obtiene el valor de una variable capturada (upvalue).
     GetUpvalue(u16),
+    /// Modifica el valor de una variable capturada (upvalue).
     SetUpvalue(u16),
+    /// Cierra un upvalue abierto moviéndolo al heap.
     CloseUpvalue,
 
-    // Clases e instancias
+    /// Declara una nueva clase.
     Class(u16),
+    /// Asocia un método a la clase actual en la pila.
     Method(u16),
+    /// Obtiene una propiedad de la instancia en el tope.
     GetProperty(u16),
+    /// Establece el valor de una propiedad en la instancia.
     SetProperty(u16),
+    /// Verifica que el operando sea una instancia válida.
     CheckInstance,
+    /// Prepara una invocación optimizada de método.
     PrepareInvoke(u16),
+    /// Prepara una invocación optimizada de método sobre `super`.
     PrepareSuperInvoke(u16),
+    /// Invoca el método previamente preparado con sus argumentos.
     Invoke(u8),
 
-    // Herencia
+    /// Establece la relación de herencia entre clase base y subclase.
     Inherit,
+    /// Busca un método en la superclase indicada.
     GetSuper(u16),
 
-    // Superinstrucciones (E5.C)
+    /// Superinstrucción: suma una constante numérica a una ranura local.
     AddLocalConst(u8, u16),
+    /// Superinstrucción: compara si una ranura local es menor que una constante.
     LessLocalConst(u8, u16),
+
+    /// Construye una lista nativa a partir de `N` elementos apilados.
+    BuildList(u16),
+    /// Obtiene un elemento de una lista por índice.
+    GetIndex,
+    /// Asigna un elemento en una lista por índice.
+    SetIndex,
+    /// Prepara los operandos en la pila para la modificación por índice.
+    PrepareIndexModify,
 }
 
+/// Contenedor de una secuencia lineal de bytecode, tabla de constantes e información de líneas.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Chunk {
+    /// Vector de instrucciones de bytecode.
     pub code: Vec<OpCode>,
+    /// Tabla de valores constantes referenciados por el código.
     pub constants: Vec<Value>,
+    /// Número de línea del código fuente original correspondiente a cada instrucción.
     pub lines: Vec<usize>,
 }
 
+/// Error emitido cuando un chunk supera el límite máximo de constantes representables (`u16::MAX`).
 #[derive(Debug, PartialEq)]
 pub struct TooManyConstants;
 
 impl Chunk {
+    /// Crea un nuevo fragmento de bytecode vacío.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Añade una instrucción al chunk registrando su número de línea y retorna su índice.
     pub fn write(&mut self, op: OpCode, line: usize) -> usize {
         self.code.push(op);
         self.lines.push(line);
         self.code.len() - 1
     }
 
+    /// Agrega un valor a la tabla de constantes y retorna su índice numérico.
     pub fn add_constant(&mut self, value: Value) -> Result<u16, TooManyConstants> {
         let index = self.constants.len();
         if index > u16::MAX as usize {
@@ -102,11 +160,13 @@ impl Chunk {
         Ok(index as u16)
     }
 
+    /// Emite una instrucción de salto provisional que será parcheada posteriormente.
     pub fn emit_jump(&mut self, op: OpCode, line: usize) -> usize {
         debug_assert!(matches!(op, OpCode::Jump(_) | OpCode::JumpIfFalse(_)));
         self.write(op, line)
     }
 
+    /// Parchea el desplazamiento relativo de una instrucción de salto previamente emitida.
     pub fn patch_jump(&mut self, at: usize) -> Result<(), ()> {
         // `ip` ya apunta a `at + 1` cuando se ejecuta el salto.
         let offset = self.code.len() - at - 1;
@@ -118,6 +178,7 @@ impl Chunk {
         Ok(())
     }
 
+    /// Emite una instrucción de salto hacia atrás (`OpCode::Loop`) hacia el inicio del bucle.
     pub fn emit_loop(&mut self, loop_start: usize, line: usize) -> Result<(), ()> {
         // +1 porque `ip` ya avanzó más allá del propio `Loop` al ejecutarlo.
         let offset = self.code.len() - loop_start + 1;
@@ -126,6 +187,7 @@ impl Chunk {
         Ok(())
     }
 
+    /// Desensambla el contenido completo del chunk en formato textual legible.
     pub fn disassemble(&self, name: &str) -> String {
         let mut out = format!("== {name} ==\n");
         for offset in 0..self.code.len() {
@@ -141,6 +203,7 @@ impl Chunk {
         out
     }
 
+    /// Desensambla una instrucción individual en la posición indicada.
     pub fn disassemble_instruction(&self, offset: usize) -> String {
         let line = if offset > 0 && self.lines[offset] == self.lines[offset - 1] {
             "   |".to_string()
@@ -203,6 +266,7 @@ impl Chunk {
                 )
             }
             OpCode::Call(n) | OpCode::Invoke(n) => format!("{:<14} {:4}", name_of(&op), n),
+            OpCode::BuildList(n) => format!("{:<14} {:4}", name_of(&op), n),
             OpCode::AddLocalConst(slot, k) | OpCode::LessLocalConst(slot, k) => {
                 format!(
                     "{:<14} slot:{} const:{} '{}'",
@@ -218,6 +282,7 @@ impl Chunk {
     }
 }
 
+/// Retorna el nombre mnemónico de una instrucción de bytecode para desensamblado.
 fn name_of(op: &OpCode) -> &'static str {
     match op {
         OpCode::Constant(_) => "OP_CONSTANT",
@@ -268,6 +333,10 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::Invoke(_) => "OP_INVOKE",
         OpCode::AddLocalConst(_, _) => "OP_ADD_LOCAL_CONST",
         OpCode::LessLocalConst(_, _) => "OP_LESS_LOCAL_CONST",
+        OpCode::BuildList(_) => "OP_BUILD_LIST",
+        OpCode::GetIndex => "OP_GET_INDEX",
+        OpCode::SetIndex => "OP_SET_INDEX",
+        OpCode::PrepareIndexModify => "OP_PREPARE_INDEX_MODIFY",
     }
 }
 

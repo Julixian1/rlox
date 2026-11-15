@@ -30,10 +30,6 @@ fn run_vm(source: &str) -> Result<(), String> {
     run_vm_output(source).map(|_| ())
 }
 
-// ---------------------------------------------------------------------------
-// Aritmética, precedencia y operadores
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_vm_arithmetic_precedence_and_grouping() {
     let source = "
@@ -127,10 +123,6 @@ fn test_vm_string_concatenation() {
     assert_eq!(output, "Hello, world!\n");
 }
 
-// ---------------------------------------------------------------------------
-// Variables, scopes y shadowing
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_vm_globals_define_and_assign() {
     let source = "
@@ -178,10 +170,6 @@ fn test_vm_multiple_blocks_reuse_slots() {
     let output = run_vm_output(source).expect("ejecución exitosa");
     assert_eq!(output, "30\n99\n");
 }
-
-// ---------------------------------------------------------------------------
-// Control de flujo
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_vm_if_else() {
@@ -242,10 +230,6 @@ fn test_vm_for_loop() {
     let output = run_vm_output(source).expect("ejecución exitosa");
     assert_eq!(output, "6\n");
 }
-
-// ---------------------------------------------------------------------------
-// Funciones, frames y llamadas
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_vm_function_call_and_return() {
@@ -322,10 +306,6 @@ fn test_vm_recursion_fibonacci() {
     let output = run_vm_output(source).expect("ejecución exitosa");
     assert_eq!(output, "55\n");
 }
-
-// ---------------------------------------------------------------------------
-// Closures y captura de upvalues
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_vm_counter_closure() {
@@ -405,10 +385,6 @@ fn test_vm_multi_level_upvalues() {
     assert_eq!(output, "3\n");
 }
 
-// ---------------------------------------------------------------------------
-// Errores de ejecución (Runtime Errors)
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_vm_runtime_error_type_mismatch_subtract() {
     let source = "var res = \"texto\" - 5;";
@@ -485,10 +461,6 @@ fn test_vm_runtime_error_call_wrong_arity() {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Tipos de runtime de la VM
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_vm_runtime_types_display_and_equality() {
     use rlox::closure::{Closure, FnProto};
@@ -535,10 +507,6 @@ fn test_vm_runtime_types_display_and_equality() {
     assert_ne!(val_bound1, val_bound2);
     assert!(val_bound1.is_truthy());
 }
-
-// ---------------------------------------------------------------------------
-// Clases, instancias, campos y orden de evaluación en Set
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_vm_class_declaration_and_instantiation() {
@@ -703,10 +671,6 @@ fn test_vm_set_evaluation_order_aborts_before_value() {
         "El efecto secundario se ejecutó indebidamente"
     );
 }
-
-// ---------------------------------------------------------------------------
-// Métodos, this e inicializadores
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_vm_method_declaration_and_invocation() {
@@ -920,10 +884,6 @@ fn test_vm_bound_methods_compared_by_identity() {
     let output = run_vm_output(source).expect("ejecución exitosa");
     assert_eq!(output, "true\nfalse\n");
 }
-
-// ---------------------------------------------------------------------------
-// Herencia y super
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_vm_simple_inheritance() {
@@ -1174,10 +1134,6 @@ fn test_vm_runtime_error_undefined_super_property() {
             .contains("Undefined property 'nonExistent'.")
     );
 }
-
-// ---------------------------------------------------------------------------
-// Tests de VM basada en registros (RegVm)
-// ---------------------------------------------------------------------------
 
 fn run_reg_vm_output(source: &str) -> Result<String, String> {
     let mut scanner = Scanner::new(source.to_string());

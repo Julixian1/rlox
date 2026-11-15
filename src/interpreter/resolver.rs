@@ -1,23 +1,34 @@
+//! Resolución de variables y cálculo de distancias léxicas para el intérprete Tree-Walk.
+
 use std::collections::{HashMap, HashSet};
 
 use crate::expr::{Expr, ExprVisitor, LiteralValue};
 use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::Token;
 
+/// Estado contextual de clase durante la resolución estática de nombres.
 #[derive(Copy, Clone, PartialEq)]
 enum ClassType {
+    /// Fuera de cualquier clase.
     None,
+    /// Dentro de una clase sin superclase.
     Class,
+    /// Dentro de una subclase con superclase declarada.
     Subclass,
 }
 
+/// Resolvedor de variables que asocia cada expresión con la cantidad de saltos de entorno hasta su declaración.
 pub struct Resolver {
+    /// Pila de ámbitos léxicos que contienen los identificadores locales declarados.
     scopes: Vec<HashSet<String>>,
+    /// Mapa que vincula el puntero de un nodo `Expr` con su distancia léxica en la cadena de ámbitos.
     pub locals: HashMap<*const Expr, usize>,
+    /// Tipo de clase actual en resolución para validar accesos a `this` y `super`.
     current_class: ClassType,
 }
 
 impl Resolver {
+    /// Crea una nueva instancia de `Resolver`.
     pub fn new() -> Self {
         Resolver {
             scopes: Vec::new(),
@@ -26,20 +37,24 @@ impl Resolver {
         }
     }
 
+    /// Abre un nuevo ámbito léxico de variables.
     fn begin_scope(&mut self) {
         self.scopes.push(HashSet::new());
     }
 
+    /// Cierra el ámbito léxico de variables más interno.
     fn end_scope(&mut self) {
         self.scopes.pop();
     }
 
+    /// Registra la declaración de una variable en el ámbito local actual.
     fn declare(&mut self, name: &Token) {
         if let Some(scope) = self.scopes.last_mut() {
             scope.insert(name.lexeme.clone());
         }
     }
 
+    /// Resuelve la distancia léxica de una variable buscando desde el ámbito más interno hacia el exterior.
     fn resolve_local(&mut self, expr_ptr: *const Expr, name: &Token) {
         for (i, scope) in self.scopes.iter().rev().enumerate() {
             if scope.contains(&name.lexeme) {
@@ -47,9 +62,9 @@ impl Resolver {
                 return;
             }
         }
-        // No encontrada en ningún scope local → es global, no se registra.
     }
 
+    /// Resuelve los parámetros y el cuerpo de una función dentro de un nuevo ámbito léxico.
     fn resolve_function(&mut self, params: &[Token], body: &[Stmt]) {
         self.begin_scope();
         for param in params {
@@ -59,16 +74,19 @@ impl Resolver {
         self.end_scope();
     }
 
+    /// Resuelve una secuencia de sentencias del programa.
     pub fn resolve_stmts(&mut self, stmts: &[Stmt]) {
         for stmt in stmts {
             self.resolve_stmt(stmt);
         }
     }
 
+    /// Despacha la resolución de una sentencia individual mediante el patrón Visitor.
     fn resolve_stmt(&mut self, stmt: &Stmt) {
         stmt.accept(self);
     }
 
+    /// Resuelve recursivamente las variables y subexpresiones de un nodo de expresión.
     pub fn resolve_expr(&mut self, expr: &Expr) {
         let ptr = expr as *const Expr;
         match expr {
@@ -121,6 +139,31 @@ impl Resolver {
             Expr::Set { object, value, .. } | Expr::SetModify { object, value, .. } => {
                 self.resolve_expr(value);
                 self.resolve_expr(object);
+            }
+            Expr::List { elements, .. } => {
+                for element in elements {
+                    self.resolve_expr(element);
+                }
+            }
+            Expr::IndexGet { object, index, .. } => {
+                self.resolve_expr(object);
+                self.resolve_expr(index);
+            }
+            Expr::IndexSet {
+                object,
+                index,
+                value,
+                ..
+            }
+            | Expr::IndexSetModify {
+                object,
+                index,
+                value,
+                ..
+            } => {
+                self.resolve_expr(value);
+                self.resolve_expr(object);
+                self.resolve_expr(index);
             }
             Expr::This { keyword } => {
                 self.resolve_local(ptr, keyword);
@@ -223,12 +266,10 @@ impl StmtVisitor<()> for Resolver {
             self.current_class = ClassType::Subclass;
             self.resolve_expr(super_expr);
 
-            // Ámbito léxico para "super"
             self.begin_scope();
             self.scopes.last_mut().unwrap().insert("super".to_string());
         }
 
-        // Ámbito léxico para "this"
         self.begin_scope();
         self.scopes.last_mut().unwrap().insert("this".to_string());
 
@@ -238,10 +279,10 @@ impl StmtVisitor<()> for Resolver {
             }
         }
 
-        self.end_scope(); // Cierra "this"
+        self.end_scope();
 
         if superclass.is_some() {
-            self.end_scope(); // Cierra "super"
+            self.end_scope();
         }
 
         self.current_class = enclosing_class;
@@ -306,14 +347,45 @@ impl ExprVisitor<()> for Resolver {
         self.resolve_local(expr as *const Expr, keyword);
     }
 
-    fn visit_ternary_expr(
-        &mut self,
-        condition: &Expr,
-        then_branch: &Expr,
-        else_branch: &Expr,
-    ) {
+    fn visit_ternary_expr(&mut self, condition: &Expr, then_branch: &Expr, else_branch: &Expr) {
         self.resolve_expr(condition);
         self.resolve_expr(then_branch);
         self.resolve_expr(else_branch);
+    }
+
+    fn visit_list_expr(&mut self, _bracket: &Token, elements: &[Expr]) {
+        for el in elements {
+            self.resolve_expr(el);
+        }
+    }
+
+    fn visit_index_get_expr(&mut self, object: &Expr, _bracket: &Token, index: &Expr) {
+        self.resolve_expr(object);
+        self.resolve_expr(index);
+    }
+
+    fn visit_index_set_expr(
+        &mut self,
+        object: &Expr,
+        _bracket: &Token,
+        index: &Expr,
+        value: &Expr,
+    ) {
+        self.resolve_expr(value);
+        self.resolve_expr(object);
+        self.resolve_expr(index);
+    }
+
+    fn visit_index_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        _bracket: &Token,
+        index: &Expr,
+        _operator: &Token,
+        value: &Expr,
+    ) {
+        self.resolve_expr(value);
+        self.resolve_expr(object);
+        self.resolve_expr(index);
     }
 }

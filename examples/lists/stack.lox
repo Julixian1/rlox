@@ -1,0 +1,64 @@
+// stack.lox
+// Demuestra la implementacion de una estructura de pila LIFO (Last-In, First-Out)
+// utilizando listas nativas y las funciones push(lista, val) y pop(lista).
+
+fun stack_new() {
+  return [];
+}
+
+fun stack_push(s, val) {
+  push(s, val);
+}
+
+fun stack_pop(s) {
+  if (len(s) == 0) {
+    print "Error: Pila vacia al desapilar.";
+    return nil;
+  }
+  return pop(s);
+}
+
+fun stack_peek(s) {
+  if (len(s) == 0) {
+    return nil;
+  }
+  return s[len(s) - 1];
+}
+
+fun stack_size(s) {
+  return len(s);
+}
+
+fun stack_is_empty(s) {
+  return len(s) == 0;
+}
+
+// Demostracion
+print "--- Inicializacion de pila ---";
+var pila = stack_new();
+print stack_is_empty(pila); // true
+print stack_size(pila);     // 0
+
+print "--- Apilando elementos (push) ---";
+stack_push(pila, "primero");
+stack_push(pila, "segundo");
+stack_push(pila, "tercero");
+
+print stack_is_empty(pila); // false
+print stack_size(pila);     // 3
+print stack_peek(pila);     // tercero
+
+print "--- Desapilando elementos (pop - LIFO) ---";
+print stack_pop(pila);      // tercero
+print stack_peek(pila);     // segundo
+print stack_size(pila);     // 2
+
+print stack_pop(pila);      // segundo
+print stack_pop(pila);      // primero
+
+print stack_is_empty(pila); // true
+print stack_size(pila);     // 0
+
+print "--- Intentando desapilar en pila vacia ---";
+var resultado = stack_pop(pila);
+print resultado;            // nil

@@ -15,7 +15,10 @@
 //! - Paridad absoluta entre Tree-Walk, Stack VM (-O0, -O1, -O2) y Register VM.
 
 use rlox::checker;
-use rlox::compiler::{self, opt::{OptConfig, OptLevel}};
+use rlox::compiler::{
+    self,
+    opt::{OptConfig, OptLevel},
+};
 use rlox::interpreter::Interpreter;
 use rlox::parser::Parser;
 use rlox::resolver::Resolver;
@@ -25,10 +28,6 @@ use rlox::vm::Vm;
 
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
-
-// ---------------------------------------------------------------------------
-// Infraestructura de ejecucion y captura de salida
-// ---------------------------------------------------------------------------
 
 #[derive(Clone, Default)]
 struct SharedOutput(Arc<Mutex<Vec<u8>>>);
@@ -63,7 +62,12 @@ fn parse_and_check(source: &str) -> Result<Vec<Stmt>, String> {
 fn run_treewalk(source: &str) -> RunResult {
     let statements = match parse_and_check(source) {
         Ok(s) => s,
-        Err(e) => return RunResult { stdout: String::new(), error: Some(e) },
+        Err(e) => {
+            return RunResult {
+                stdout: String::new(),
+                error: Some(e),
+            };
+        }
     };
 
     let mut resolver = Resolver::new();
@@ -79,7 +83,9 @@ fn run_treewalk(source: &str) -> RunResult {
     let err = interpreter.interpret(&statements).err();
     let stdout = {
         let bytes = output_arc.lock().unwrap().clone();
-        String::from_utf8(bytes).unwrap_or_default().replace("\r\n", "\n")
+        String::from_utf8(bytes)
+            .unwrap_or_default()
+            .replace("\r\n", "\n")
     };
 
     RunResult { stdout, error: err }
@@ -88,13 +94,23 @@ fn run_treewalk(source: &str) -> RunResult {
 fn run_stack_vm(source: &str, opt_level: OptLevel) -> RunResult {
     let statements = match parse_and_check(source) {
         Ok(s) => s,
-        Err(e) => return RunResult { stdout: String::new(), error: Some(e) },
+        Err(e) => {
+            return RunResult {
+                stdout: String::new(),
+                error: Some(e),
+            };
+        }
     };
 
     let opt_config = OptConfig::from_level(opt_level);
     let proto = match compiler::compile_with_opt(&statements, opt_config) {
         Ok(p) => p,
-        Err(e) => return RunResult { stdout: String::new(), error: Some(e) },
+        Err(e) => {
+            return RunResult {
+                stdout: String::new(),
+                error: Some(e),
+            };
+        }
     };
 
     let mut output = Vec::new();
@@ -102,7 +118,9 @@ fn run_stack_vm(source: &str, opt_level: OptLevel) -> RunResult {
         let mut vm = Vm::with_output(&mut output);
         vm.interpret(proto).err()
     };
-    let stdout = String::from_utf8(output).unwrap_or_default().replace("\r\n", "\n");
+    let stdout = String::from_utf8(output)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
 
     RunResult { stdout, error: err }
 }
@@ -110,12 +128,22 @@ fn run_stack_vm(source: &str, opt_level: OptLevel) -> RunResult {
 fn run_register_vm(source: &str) -> RunResult {
     let statements = match parse_and_check(source) {
         Ok(s) => s,
-        Err(e) => return RunResult { stdout: String::new(), error: Some(e) },
+        Err(e) => {
+            return RunResult {
+                stdout: String::new(),
+                error: Some(e),
+            };
+        }
     };
 
     let proto = match rlox::compiler::reg::codegen::compile(&statements) {
         Ok(p) => p,
-        Err(e) => return RunResult { stdout: String::new(), error: Some(e) },
+        Err(e) => {
+            return RunResult {
+                stdout: String::new(),
+                error: Some(e),
+            };
+        }
     };
 
     let mut output = Vec::new();
@@ -123,7 +151,9 @@ fn run_register_vm(source: &str) -> RunResult {
         let mut vm = rlox::compiler::reg::vm::RegVm::with_output(&mut output);
         vm.interpret(proto).err()
     };
-    let stdout = String::from_utf8(output).unwrap_or_default().replace("\r\n", "\n");
+    let stdout = String::from_utf8(output)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
 
     RunResult { stdout, error: err }
 }
@@ -137,11 +167,31 @@ fn assert_all_backends_ok(source: &str, expected_stdout: &str) {
     let vm_o2 = run_stack_vm(source, OptLevel::O2);
     let reg = run_register_vm(source);
 
-    assert!(tw.error.is_none(), "TreeWalk fallo inesperadamente: {:?}", tw.error);
-    assert!(vm_o0.error.is_none(), "VM -O0 fallo inesperadamente: {:?}", vm_o0.error);
-    assert!(vm_o1.error.is_none(), "VM -O1 fallo inesperadamente: {:?}", vm_o1.error);
-    assert!(vm_o2.error.is_none(), "VM -O2 fallo inesperadamente: {:?}", vm_o2.error);
-    assert!(reg.error.is_none(), "RegVM fallo inesperadamente: {:?}", reg.error);
+    assert!(
+        tw.error.is_none(),
+        "TreeWalk fallo inesperadamente: {:?}",
+        tw.error
+    );
+    assert!(
+        vm_o0.error.is_none(),
+        "VM -O0 fallo inesperadamente: {:?}",
+        vm_o0.error
+    );
+    assert!(
+        vm_o1.error.is_none(),
+        "VM -O1 fallo inesperadamente: {:?}",
+        vm_o1.error
+    );
+    assert!(
+        vm_o2.error.is_none(),
+        "VM -O2 fallo inesperadamente: {:?}",
+        vm_o2.error
+    );
+    assert!(
+        reg.error.is_none(),
+        "RegVM fallo inesperadamente: {:?}",
+        reg.error
+    );
 
     assert_eq!(tw.stdout, expected_stdout, "TreeWalk stdout difiere");
     assert_eq!(vm_o0.stdout, expected_stdout, "VM -O0 stdout difiere");
@@ -149,10 +199,6 @@ fn assert_all_backends_ok(source: &str, expected_stdout: &str) {
     assert_eq!(vm_o2.stdout, expected_stdout, "VM -O2 stdout difiere");
     assert_eq!(reg.stdout, expected_stdout, "RegVM stdout difiere");
 }
-
-// ---------------------------------------------------------------------------
-// Tests de ejecucion y semantica de break / continue
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_break_in_while() {
@@ -230,7 +276,6 @@ while (i < 10) {
 
 #[test]
 fn test_for_omitted_clauses() {
-    // 1. Sin inicializador
     let src1 = r#"
 var i = 0;
 for (; i < 3; i = i + 1) {
@@ -239,7 +284,6 @@ for (; i < 3; i = i + 1) {
 "#;
     assert_all_backends_ok(src1, "0\n1\n2\n");
 
-    // 2. Sin condicion
     let src2 = r#"
 for (var j = 0; ; j = j + 1) {
     if (j == 3) break;
@@ -248,7 +292,6 @@ for (var j = 0; ; j = j + 1) {
 "#;
     assert_all_backends_ok(src2, "0\n1\n2\n");
 
-    // 3. Sin incremento
     let src3 = r#"
 for (var k = 0; k < 3;) {
     print k;
@@ -257,7 +300,6 @@ for (var k = 0; k < 3;) {
 "#;
     assert_all_backends_ok(src3, "0\n1\n2\n");
 
-    // 4. Sin nada: for (;;)
     let src4 = r#"
 var count = 0;
 for (;;) {
@@ -341,7 +383,6 @@ for (var i = 0; i < 5; i = i + 1) {
 }
 print total;
 "#;
-    // Para i=0: 1+2+3=6. Para i=1: 6+6=12. Para i=2,3,4: continue
     assert_all_backends_ok(src, "12\n");
 }
 
@@ -416,7 +457,6 @@ while (x > 0) {
 }
 print x;
 "#;
-    // 100 -> 85 -> 70 -> 55 -> 40 (<=50 => break)
     assert_all_backends_ok(src, "40\n");
 }
 
@@ -432,7 +472,6 @@ for (var i = 1; i <= 5; i += 1) {
 }
 print acc;
 "#;
-    // i=1: acc=1; i=2: cont; i=3: acc=4; i=4: cont; i=5: acc=9
     assert_all_backends_ok(src, "9\n");
 }
 
@@ -463,10 +502,6 @@ print count;
 "#;
     assert_all_backends_ok(src, "1\n");
 }
-
-// ---------------------------------------------------------------------------
-// Tests de rechazo en Checker y Errores Sintacticos
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_checker_error_break_outside_loop() {
@@ -599,5 +634,3 @@ print total;
 "#;
     assert_all_backends_ok(src, "6\n");
 }
-
-

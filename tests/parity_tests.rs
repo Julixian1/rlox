@@ -157,10 +157,6 @@ fn assert_parity_err(source: &str, expected_substring: &str) {
     );
 }
 
-// ===========================================================================
-// Test del escritor inyectado
-// ===========================================================================
-
 #[test]
 fn test_parity_injected_writer_captures_multiple_prints() {
     let source = "
@@ -174,10 +170,6 @@ fn test_parity_injected_writer_captures_multiple_prints() {
     assert_eq!(tw.stdout, "linea 1\n5\ntrue\nnil\n");
     assert_eq!(vm.stdout, "linea 1\n5\ntrue\nnil\n");
 }
-
-// ===========================================================================
-// A. Clases e instancias
-// ===========================================================================
 
 #[test]
 fn test_parity_global_class_and_instance() {
@@ -279,10 +271,6 @@ fn test_parity_runtime_error_undefined_property() {
     ";
     assert_parity_err(source, "Undefined property 'noExiste'.");
 }
-
-// ===========================================================================
-// B. Métodos y this
-// ===========================================================================
 
 #[test]
 fn test_parity_method_declaration_and_invocation() {
@@ -423,10 +411,6 @@ fn test_parity_method_invoking_another_method() {
     assert_parity_ok(source);
 }
 
-// ===========================================================================
-// C. Inicializadores
-// ===========================================================================
-
 #[test]
 fn test_parity_initializer_without_parameters() {
     let source = "
@@ -536,10 +520,6 @@ fn test_parity_initializer_runtime_error_propagates() {
     ";
     assert_parity_err(source, "Operands must be numbers.");
 }
-
-// ===========================================================================
-// D. Herencia y super
-// ===========================================================================
 
 #[test]
 fn test_parity_simple_inheritance() {
@@ -812,10 +792,6 @@ fn test_parity_runtime_error_undefined_super_property() {
     assert_parity_err(source, "Undefined property 'noExiste'.");
 }
 
-// ===========================================================================
-// E. Semántica y casos límite
-// ===========================================================================
-
 #[test]
 fn test_parity_set_evaluation_order_lhs_checked_first() {
     let source = "
@@ -987,10 +963,6 @@ fn test_parity_runtime_error_call_non_callable() {
     ";
     assert_parity_err(source, "Can only call functions and classes.");
 }
-
-// ===========================================================================
-// F. Casos semánticos inválidos (Scanner / Parser / Checker compartidos)
-// ===========================================================================
 
 #[test]
 fn test_parity_semantic_error_this_outside_class() {
