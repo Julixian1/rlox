@@ -37,11 +37,19 @@ enum FnKind {
 }
 
 #[derive(Clone)]
+struct LoopContext {
+    scope_depth: usize,
+    break_jumps: Vec<usize>,
+    continue_jumps: Vec<usize>,
+}
+
+#[derive(Clone)]
 struct FnState {
     proto: FnProto,
     locals: Vec<Local>,
     scope_depth: usize,
     kind: FnKind,
+    loop_contexts: Vec<LoopContext>,
 }
 
 impl FnState {
@@ -59,6 +67,7 @@ impl FnState {
             }],
             scope_depth: 0,
             kind,
+            loop_contexts: Vec::new(),
         }
     }
 
@@ -504,7 +513,7 @@ impl Compiler {
     fn compile_stmt_sequence(&mut self, statements: &[Stmt]) -> CResult {
         for (i, stmt) in statements.iter().enumerate() {
             stmt.accept(self)?;
-            if matches!(stmt, Stmt::Return { .. }) {
+            if matches!(stmt, Stmt::Return { .. } | Stmt::Break { .. } | Stmt::Continue { .. }) {
                 if self.opt.dead_code_elimination {
                     let dead_tail = &statements[i + 1..];
                     if !dead_tail.is_empty() {
@@ -1029,7 +1038,15 @@ impl StmtVisitor<CResult> for Compiler {
         if self.opt.dead_code_elimination {
             if let Some(val) = self.try_eval_condition(condition) {
                 if !val.is_truthy() {
-                    self.validate_dead_stmt(body)?;
+                    let scope_depth = self.state().scope_depth;
+                    let mut validator = self.clone();
+                    validator.opt.dead_code_elimination = false;
+                    validator.state().loop_contexts.push(LoopContext {
+                        scope_depth,
+                        break_jumps: Vec::new(),
+                        continue_jumps: Vec::new(),
+                    });
+                    body.accept(&mut validator)?;
                     return Ok(());
                 }
             }
@@ -1039,10 +1056,164 @@ impl StmtVisitor<CResult> for Compiler {
         condition.accept(self)?;
         let exit_jump = self.emit_jump(OpCode::JumpIfFalse(0));
         self.emit(OpCode::Pop);
+
+        let scope_depth = self.state().scope_depth;
+        self.state().loop_contexts.push(LoopContext {
+            scope_depth,
+            break_jumps: Vec::new(),
+            continue_jumps: Vec::new(),
+        });
+
         body.accept(self)?;
+
+        let loop_ctx = self.state().loop_contexts.pop().unwrap();
+
+        // Continue target
+        for c_jump in loop_ctx.continue_jumps {
+            self.patch_jump(c_jump)?;
+        }
+
         self.emit_loop(loop_start)?;
         self.patch_jump(exit_jump)?;
         self.emit(OpCode::Pop);
+
+        // Break target: condition is already popped on all paths reaching here
+        for b_jump in loop_ctx.break_jumps {
+            self.patch_jump(b_jump)?;
+        }
+
+        Ok(())
+    }
+
+    fn visit_break_stmt(&mut self, keyword: &Token) -> CResult {
+        self.line = keyword.line;
+        let loop_scope = match self.state().loop_contexts.last() {
+            Some(ctx) => ctx.scope_depth,
+            None => return Err(self.error("Can't use 'break' outside of a loop.")),
+        };
+
+        let locals = self.state().locals.clone();
+        for local in locals.iter().rev() {
+            if local.depth > loop_scope {
+                if local.is_captured {
+                    self.emit(OpCode::CloseUpvalue);
+                } else {
+                    self.emit(OpCode::Pop);
+                }
+            } else {
+                break;
+            }
+        }
+
+        let jump = self.emit_jump(OpCode::Jump(0));
+        self.state().loop_contexts.last_mut().unwrap().break_jumps.push(jump);
+        Ok(())
+    }
+
+    fn visit_continue_stmt(&mut self, keyword: &Token) -> CResult {
+        self.line = keyword.line;
+        let loop_scope = match self.state().loop_contexts.last() {
+            Some(ctx) => ctx.scope_depth,
+            None => return Err(self.error("Can't use 'continue' outside of a loop.")),
+        };
+
+        let locals = self.state().locals.clone();
+        for local in locals.iter().rev() {
+            if local.depth > loop_scope {
+                if local.is_captured {
+                    self.emit(OpCode::CloseUpvalue);
+                } else {
+                    self.emit(OpCode::Pop);
+                }
+            } else {
+                break;
+            }
+        }
+
+        let jump = self.emit_jump(OpCode::Jump(0));
+        self.state().loop_contexts.last_mut().unwrap().continue_jumps.push(jump);
+        Ok(())
+    }
+
+    fn visit_for_stmt(
+        &mut self,
+        initializer: &Option<Box<Stmt>>,
+        condition: &Option<Expr>,
+        increment: &Option<Expr>,
+        body: &Stmt,
+    ) -> CResult {
+        self.begin_scope();
+
+        if let Some(init) = initializer {
+            init.accept(self)?;
+        }
+
+        if self.opt.dead_code_elimination {
+            if let Some(cond) = condition {
+                if let Some(val) = self.try_eval_condition(cond) {
+                    if !val.is_truthy() {
+                        let scope_depth = self.state().scope_depth;
+                        let mut validator = self.clone();
+                        validator.opt.dead_code_elimination = false;
+                        validator.state().loop_contexts.push(LoopContext {
+                            scope_depth,
+                            break_jumps: Vec::new(),
+                            continue_jumps: Vec::new(),
+                        });
+                        body.accept(&mut validator)?;
+                        self.end_scope();
+                        return Ok(());
+                    }
+                }
+            }
+        }
+
+        let loop_start = self.chunk().code.len();
+
+        let exit_jump = if let Some(cond) = condition {
+            cond.accept(self)?;
+            let j = self.emit_jump(OpCode::JumpIfFalse(0));
+            self.emit(OpCode::Pop);
+            Some(j)
+        } else {
+            None
+        };
+
+        let scope_depth = self.state().scope_depth;
+        self.state().loop_contexts.push(LoopContext {
+            scope_depth,
+            break_jumps: Vec::new(),
+            continue_jumps: Vec::new(),
+        });
+
+        body.accept(self)?;
+
+        let loop_ctx = self.state().loop_contexts.pop().unwrap();
+
+        // Continue target: patch continue jumps to here, before increment
+        for c_jump in loop_ctx.continue_jumps {
+            self.patch_jump(c_jump)?;
+        }
+
+        // Increment
+        if let Some(inc) = increment {
+            inc.accept(self)?;
+            self.emit(OpCode::Pop);
+        }
+
+        self.emit_loop(loop_start)?;
+
+        if let Some(j) = exit_jump {
+            self.patch_jump(j)?;
+            self.emit(OpCode::Pop);
+        }
+
+        // Break target: patch break jumps to here
+        for b_jump in loop_ctx.break_jumps {
+            self.patch_jump(b_jump)?;
+        }
+
+        self.end_scope();
         Ok(())
     }
 

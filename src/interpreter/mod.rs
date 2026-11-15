@@ -55,6 +55,12 @@ impl Interpreter {
                     ReturnSignal::Return(_) => {
                         Err("Cannot return from top-level code.".to_string())
                     }
+                    ReturnSignal::Break => {
+                        Err("Cannot break from top-level code.".to_string())
+                    }
+                    ReturnSignal::Continue => {
+                        Err("Cannot continue from top-level code.".to_string())
+                    }
                 };
             }
         }
@@ -264,9 +270,63 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
 
     fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) -> Result<(), ReturnSignal> {
         while self.evaluate(condition)?.is_truthy() {
-            self.execute(body)?;
+            match self.execute(body) {
+                Ok(()) => {}
+                Err(ReturnSignal::Continue) => {}
+                Err(ReturnSignal::Break) => break,
+                Err(other) => return Err(other),
+            }
         }
         Ok(())
+    }
+
+    fn visit_break_stmt(&mut self, _keyword: &Token) -> Result<(), ReturnSignal> {
+        Err(ReturnSignal::Break)
+    }
+
+    fn visit_continue_stmt(&mut self, _keyword: &Token) -> Result<(), ReturnSignal> {
+        Err(ReturnSignal::Continue)
+    }
+
+    fn visit_for_stmt(
+        &mut self,
+        initializer: &Option<Box<Stmt>>,
+        condition: &Option<Expr>,
+        increment: &Option<Expr>,
+        body: &Stmt,
+    ) -> Result<(), ReturnSignal> {
+        let previous = self.environment.clone();
+        let loop_env = Rc::new(RefCell::new(Environment::new_enclosed(previous.clone())));
+        self.environment = loop_env;
+
+        let result = (|| -> Result<(), ReturnSignal> {
+            if let Some(init) = initializer {
+                self.execute(init)?;
+            }
+
+            loop {
+                if let Some(cond) = condition {
+                    if !self.evaluate(cond)?.is_truthy() {
+                        break;
+                    }
+                }
+
+                match self.execute(body) {
+                    Ok(()) => {}
+                    Err(ReturnSignal::Continue) => {}
+                    Err(ReturnSignal::Break) => break,
+                    Err(other) => return Err(other),
+                }
+
+                if let Some(inc) = increment {
+                    self.evaluate(inc)?;
+                }
+            }
+            Ok(())
+        })();
+
+        self.environment = previous;
+        result
     }
 
     fn visit_function_stmt(

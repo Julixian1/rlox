@@ -10,6 +10,7 @@ type Finding = (usize, String);
 pub fn check(statements: &[Stmt]) -> Vec<String> {
     let mut findings = ReturnCheck::run(statements);
     findings.extend(DeclarationCheck::run(statements));
+    findings.extend(LoopCheck::run(statements));
     findings.sort_by_key(|(line, _)| *line);
     findings.into_iter().map(|(_, message)| message).collect()
 }
@@ -94,6 +95,23 @@ impl StmtVisitor<()> for ReturnCheck {
                 ),
             ));
         }
+    }
+
+    fn visit_break_stmt(&mut self, _keyword: &Token) {}
+
+    fn visit_continue_stmt(&mut self, _keyword: &Token) {}
+
+    fn visit_for_stmt(
+        &mut self,
+        initializer: &Option<Box<Stmt>>,
+        _condition: &Option<Expr>,
+        _increment: &Option<Expr>,
+        body: &Stmt,
+    ) {
+        if let Some(init) = initializer {
+            init.accept(self);
+        }
+        body.accept(self);
     }
 
     fn visit_class_stmt(&mut self, _name: &Token, _superclass: &Option<Expr>, methods: &[Stmt]) {
@@ -368,5 +386,141 @@ impl StmtVisitor<()> for DeclarationCheck {
 
         self.in_class = enclosing_in_class;
         self.class_context = enclosing_context;
+    }
+
+    fn visit_break_stmt(&mut self, _keyword: &Token) {}
+
+    fn visit_continue_stmt(&mut self, _keyword: &Token) {}
+
+    fn visit_for_stmt(
+        &mut self,
+        initializer: &Option<Box<Stmt>>,
+        condition: &Option<Expr>,
+        increment: &Option<Expr>,
+        body: &Stmt,
+    ) {
+        self.begin_scope();
+        if let Some(init) = initializer {
+            init.accept(self);
+        }
+        if let Some(cond) = condition {
+            self.check_expr(cond);
+        }
+        if let Some(inc) = increment {
+            self.check_expr(inc);
+        }
+        body.accept(self);
+        self.end_scope();
+    }
+}
+
+struct LoopCheck {
+    loop_depth: usize,
+    findings: Vec<Finding>,
+}
+
+impl LoopCheck {
+    fn run(statements: &[Stmt]) -> Vec<Finding> {
+        let mut pass = LoopCheck {
+            loop_depth: 0,
+            findings: Vec::new(),
+        };
+        for stmt in statements {
+            stmt.accept(&mut pass);
+        }
+        pass.findings
+    }
+}
+
+impl StmtVisitor<()> for LoopCheck {
+    fn visit_expression_stmt(&mut self, _expression: &Expr) {}
+    fn visit_print_stmt(&mut self, _expression: &Expr) {}
+    fn visit_var_stmt(&mut self, _name: &Token, _initializer: &Option<Expr>) {}
+
+    fn visit_block_stmt(&mut self, statements: &[Stmt]) {
+        for stmt in statements {
+            stmt.accept(self);
+        }
+    }
+
+    fn visit_if_stmt(
+        &mut self,
+        _condition: &Expr,
+        then_branch: &Stmt,
+        else_branch: &Option<Box<Stmt>>,
+    ) {
+        then_branch.accept(self);
+        if let Some(else_stmt) = else_branch {
+            else_stmt.accept(self);
+        }
+    }
+
+    fn visit_while_stmt(&mut self, _condition: &Expr, body: &Stmt) {
+        self.loop_depth += 1;
+        body.accept(self);
+        self.loop_depth -= 1;
+    }
+
+    fn visit_for_stmt(
+        &mut self,
+        initializer: &Option<Box<Stmt>>,
+        _condition: &Option<Expr>,
+        _increment: &Option<Expr>,
+        body: &Stmt,
+    ) {
+        if let Some(init) = initializer {
+            init.accept(self);
+        }
+        self.loop_depth += 1;
+        body.accept(self);
+        self.loop_depth -= 1;
+    }
+
+    fn visit_function_stmt(&mut self, _name: &Token, _params: &[Token], body: &Rc<Vec<Stmt>>) {
+        let enclosing = self.loop_depth;
+        self.loop_depth = 0;
+        for stmt in body.iter() {
+            stmt.accept(self);
+        }
+        self.loop_depth = enclosing;
+    }
+
+    fn visit_return_stmt(&mut self, _keyword: &Token, _value: &Option<Expr>) {}
+
+    fn visit_break_stmt(&mut self, keyword: &Token) {
+        if self.loop_depth == 0 {
+            self.findings.push((
+                keyword.line,
+                format!(
+                    "[line {}] Error at 'break': Can't use 'break' outside of a loop.",
+                    keyword.line
+                ),
+            ));
+        }
+    }
+
+    fn visit_continue_stmt(&mut self, keyword: &Token) {
+        if self.loop_depth == 0 {
+            self.findings.push((
+                keyword.line,
+                format!(
+                    "[line {}] Error at 'continue': Can't use 'continue' outside of a loop.",
+                    keyword.line
+                ),
+            ));
+        }
+    }
+
+    fn visit_class_stmt(&mut self, _name: &Token, _superclass: &Option<Expr>, methods: &[Stmt]) {
+        for method in methods {
+            if let Stmt::Function { body, .. } = method {
+                let enclosing = self.loop_depth;
+                self.loop_depth = 0;
+                for stmt in body.iter() {
+                    stmt.accept(self);
+                }
+                self.loop_depth = enclosing;
+            }
+        }
     }
 }

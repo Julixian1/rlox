@@ -26,6 +26,18 @@ pub trait StmtVisitor<R> {
     fn visit_function_stmt(&mut self, name: &Token, params: &[Token], body: &Rc<Vec<Stmt>>) -> R;
     /// Procesa una sentencia de retorno (`return expr;`).
     fn visit_return_stmt(&mut self, keyword: &Token, value: &Option<Expr>) -> R;
+    /// Procesa una sentencia `break;`.
+    fn visit_break_stmt(&mut self, keyword: &Token) -> R;
+    /// Procesa una sentencia `continue;`.
+    fn visit_continue_stmt(&mut self, keyword: &Token) -> R;
+    /// Procesa un bucle `for (init; cond; inc) body`.
+    fn visit_for_stmt(
+        &mut self,
+        initializer: &Option<Box<Stmt>>,
+        condition: &Option<Expr>,
+        increment: &Option<Expr>,
+        body: &Stmt,
+    ) -> R;
     /// Procesa una declaración de clase (`class name < superclass { methods }`).
     fn visit_class_stmt(&mut self, name: &Token, superclass: &Option<Expr>, methods: &[Stmt]) -> R;
 }
@@ -64,6 +76,18 @@ pub enum Stmt {
         keyword: Token,
         value: Option<Expr>,
     },
+    Break {
+        keyword: Token,
+    },
+    Continue {
+        keyword: Token,
+    },
+    For {
+        initializer: Option<Box<Stmt>>,
+        condition: Option<Expr>,
+        increment: Option<Expr>,
+        body: Box<Stmt>,
+    },
     Class {
         name: Token,
         superclass: Option<Expr>,
@@ -89,6 +113,14 @@ impl Stmt {
                 visitor.visit_function_stmt(name, params, body)
             }
             Stmt::Return { keyword, value } => visitor.visit_return_stmt(keyword, value),
+            Stmt::Break { keyword } => visitor.visit_break_stmt(keyword),
+            Stmt::Continue { keyword } => visitor.visit_continue_stmt(keyword),
+            Stmt::For {
+                initializer,
+                condition,
+                increment,
+                body,
+            } => visitor.visit_for_stmt(initializer, condition, increment, body),
             Stmt::Class {
                 name,
                 superclass,

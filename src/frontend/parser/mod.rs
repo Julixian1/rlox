@@ -1,4 +1,4 @@
-use crate::expr::{Expr, LiteralValue};
+use crate::expr::Expr;
 use crate::stmt::Stmt;
 use crate::token::{Token, TokenType};
  
@@ -112,7 +112,9 @@ impl Parser {
                 | TokenType::If
                 | TokenType::While
                 | TokenType::Print
-                | TokenType::Return => return,
+                | TokenType::Return
+                | TokenType::Break
+                | TokenType::Continue => return,
                 _ => {}
             }
  
@@ -252,6 +254,12 @@ impl Parser {
         if self.match_token(&[TokenType::Return]) {
             return self.return_statement();
         }
+        if self.match_token(&[TokenType::Break]) {
+            return self.break_statement();
+        }
+        if self.match_token(&[TokenType::Continue]) {
+            return self.continue_statement();
+        }
  
         self.expression_statement()
     }
@@ -317,29 +325,27 @@ impl Parser {
         Ok(Stmt::While { condition, body })
     }
  
-    /// Parsea un bucle `for (init; cond; inc) body` transformándolo (desugaring) en estructuras `While` y `Block`.
+    /// Parsea un bucle `for (init; cond; inc) body`.
     fn for_statement(&mut self) -> Result<Stmt, String> {
         self.consume(&TokenType::LeftParen, "Expected '(' after 'for'.")?;
- 
+
         // Inicializador
         let initializer = if self.match_token(&[TokenType::Semicolon]) {
             None
         } else if self.match_token(&[TokenType::Var]) {
-            Some(self.var_declaration()?)
+            Some(Box::new(self.var_declaration()?))
         } else {
-            Some(self.expression_statement()?)
+            Some(Box::new(self.expression_statement()?))
         };
- 
+
         // Condición
         let condition = if !self.check(&TokenType::Semicolon) {
-            self.expression()?
+            Some(self.expression()?)
         } else {
-            Expr::Literal {
-                value: LiteralValue::Bool(true),
-            }
+            None
         };
         self.consume(&TokenType::Semicolon, "Expected ';' after loop condition.")?;
- 
+
         // Incremento
         let increment = if !self.check(&TokenType::RightParen) {
             Some(self.expression()?)
@@ -347,34 +353,32 @@ impl Parser {
             None
         };
         self.consume(&TokenType::RightParen, "Expected ')' after for clauses.")?;
- 
+
         // Body
-        let mut body = self.statement()?;
- 
-        // Desugaring: agregar incremento al final del body
-        if let Some(inc) = increment {
-            body = Stmt::Block {
-                statements: vec![body, Stmt::Expression { expression: inc }],
-            };
-        }
- 
-        // Envolver en while
-        body = Stmt::While {
+        let body = Box::new(self.statement()?);
+
+        Ok(Stmt::For {
+            initializer,
             condition,
-            body: Box::new(body),
-        };
- 
-        // Envolver con inicializador
-        if let Some(init) = initializer {
-            body = Stmt::Block {
-                statements: vec![init, body],
-            };
-        }
- 
-        Ok(body)
+            increment,
+            body,
+        })
     }
- 
-    /// Parsea una sentencia de retorno (`return expr;`).
+
+    /// Parsea una sentencia `break;`.
+    fn break_statement(&mut self) -> Result<Stmt, String> {
+        let keyword = self.previous().clone();
+        self.consume(&TokenType::Semicolon, "Expected ';' after 'break'.")?;
+        Ok(Stmt::Break { keyword })
+    }
+
+    /// Parsea una sentencia `continue;`.
+    fn continue_statement(&mut self) -> Result<Stmt, String> {
+        let keyword = self.previous().clone();
+        self.consume(&TokenType::Semicolon, "Expected ';' after 'continue'.")?;
+        Ok(Stmt::Continue { keyword })
+    }
+
     fn return_statement(&mut self) -> Result<Stmt, String> {
         let keyword = self.previous().clone();
  

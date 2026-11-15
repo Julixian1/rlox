@@ -16,6 +16,8 @@ static NEXT_FUNCTION_ID: AtomicUsize = AtomicUsize::new(0);
 #[derive(Debug)]
 pub enum ReturnSignal {
     Return(Value),
+    Break,
+    Continue,
     Error(String),
 }
 
@@ -104,6 +106,12 @@ impl LoxFunction {
             // 1. Un error en tiempo de ejecución SIEMPRE se propaga de inmediato como Err.
             // NUNCA debe convertirse en retorno de 'this'.
             Err(ReturnSignal::Error(err)) => Err(ReturnSignal::Error(err)),
+            Err(ReturnSignal::Break) => {
+                Err(ReturnSignal::Error("Cannot break out of a function.".to_string()))
+            }
+            Err(ReturnSignal::Continue) => {
+                Err(ReturnSignal::Error("Cannot continue out of a function.".to_string()))
+            }
 
             // 2. Un retorno explícito en un inicializador devuelve 'this'.
             Err(ReturnSignal::Return(value)) => {

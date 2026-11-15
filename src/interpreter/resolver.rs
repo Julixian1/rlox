@@ -188,6 +188,31 @@ impl StmtVisitor<()> for Resolver {
         self.resolve_stmt(body);
     }
 
+    fn visit_break_stmt(&mut self, _keyword: &Token) {}
+
+    fn visit_continue_stmt(&mut self, _keyword: &Token) {}
+
+    fn visit_for_stmt(
+        &mut self,
+        initializer: &Option<Box<Stmt>>,
+        condition: &Option<Expr>,
+        increment: &Option<Expr>,
+        body: &Stmt,
+    ) {
+        self.begin_scope();
+        if let Some(init) = initializer {
+            self.resolve_stmt(init);
+        }
+        if let Some(cond) = condition {
+            self.resolve_expr(cond);
+        }
+        if let Some(inc) = increment {
+            self.resolve_expr(inc);
+        }
+        self.resolve_stmt(body);
+        self.end_scope();
+    }
+
     fn visit_class_stmt(&mut self, name: &Token, superclass: &Option<Expr>, methods: &[Stmt]) {
         let enclosing_class = self.current_class;
         self.current_class = ClassType::Class;

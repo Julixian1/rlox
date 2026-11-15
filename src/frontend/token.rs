@@ -37,7 +37,9 @@ pub enum TokenType {
 
     // Palabras clave
     And,
+    Break,
     Class,
+    Continue,
     Else,
     False,
     Fun,
@@ -101,7 +103,9 @@ impl Token {
 pub fn get_keyword(keyword: &str) -> Option<TokenType> {
     match keyword {
         "and" => Some(TokenType::And),
+        "break" => Some(TokenType::Break),
         "class" => Some(TokenType::Class),
+        "continue" => Some(TokenType::Continue),
         "else" => Some(TokenType::Else),
         "false" => Some(TokenType::False),
         "fun" => Some(TokenType::Fun),

@@ -16,6 +16,13 @@ struct Local {
     captured: bool,
 }
 
+#[derive(Clone)]
+struct RegLoopContext {
+    scope_depth: usize,
+    break_jumps: Vec<usize>,
+    continue_jumps: Vec<usize>,
+}
+
 /// Estado de la función que se está compilando.
 struct FnState {
     name: Option<String>,
@@ -26,6 +33,7 @@ struct FnState {
     scope_depth: usize,
     /// Primer registro libre. Los registros `0..locals.len()` son locales.
     free_reg: usize,
+    loop_contexts: Vec<RegLoopContext>,
 }
 
 impl FnState {
@@ -38,6 +46,7 @@ impl FnState {
             upvalues: Vec::new(),
             scope_depth,
             free_reg: 0,
+            loop_contexts: Vec::new(),
         }
     }
 
@@ -273,9 +282,129 @@ impl RegCompiler {
                 let c = self.operand(condition)?;
                 let exit_jump = self.emit_jump(RegOp::JumpIfFalse(c, 0));
                 self.st.free_reg = saved;
+
+                let scope_depth = self.st.scope_depth;
+                self.st.loop_contexts.push(RegLoopContext {
+                    scope_depth,
+                    break_jumps: Vec::new(),
+                    continue_jumps: Vec::new(),
+                });
+
                 self.stmt(body)?;
+
+                let loop_ctx = self.st.loop_contexts.pop().unwrap();
+
+                for c_jump in loop_ctx.continue_jumps {
+                    self.patch_jump(c_jump)?;
+                }
+
                 self.emit_loop(loop_start)?;
-                self.patch_jump(exit_jump)
+                self.patch_jump(exit_jump)?;
+
+                for b_jump in loop_ctx.break_jumps {
+                    self.patch_jump(b_jump)?;
+                }
+                Ok(())
+            }
+            Stmt::For {
+                initializer,
+                condition,
+                increment,
+                body,
+            } => {
+                self.begin_scope();
+
+                if let Some(init) = initializer {
+                    self.stmt(init)?;
+                }
+
+                let loop_start = self.st.chunk.code.len();
+
+                let exit_jump = if let Some(cond) = condition {
+                    let saved = self.st.free_reg;
+                    let c = self.operand(cond)?;
+                    let j = self.emit_jump(RegOp::JumpIfFalse(c, 0));
+                    self.st.free_reg = saved;
+                    Some(j)
+                } else {
+                    None
+                };
+
+                let scope_depth = self.st.scope_depth;
+                self.st.loop_contexts.push(RegLoopContext {
+                    scope_depth,
+                    break_jumps: Vec::new(),
+                    continue_jumps: Vec::new(),
+                });
+
+                self.stmt(body)?;
+
+                let loop_ctx = self.st.loop_contexts.pop().unwrap();
+
+                for c_jump in loop_ctx.continue_jumps {
+                    self.patch_jump(c_jump)?;
+                }
+
+                if let Some(inc) = increment {
+                    self.expr_discard(inc)?;
+                }
+
+                self.emit_loop(loop_start)?;
+
+                if let Some(j) = exit_jump {
+                    self.patch_jump(j)?;
+                }
+
+                for b_jump in loop_ctx.break_jumps {
+                    self.patch_jump(b_jump)?;
+                }
+
+                self.end_scope();
+                Ok(())
+            }
+            Stmt::Break { keyword } => {
+                self.line = keyword.line;
+                let loop_scope = match self.st.loop_contexts.last() {
+                    Some(ctx) => ctx.scope_depth,
+                    None => return Err(self.error("Can't use 'break' outside of a loop.")),
+                };
+
+                let mut first_captured = None;
+                for (i, local) in self.st.locals.iter().enumerate() {
+                    if local.depth > loop_scope && local.captured {
+                        first_captured = Some(i as u8);
+                        break;
+                    }
+                }
+                if let Some(r) = first_captured {
+                    self.emit(RegOp::Close(r));
+                }
+
+                let jump = self.emit_jump(RegOp::Jump(0));
+                self.st.loop_contexts.last_mut().unwrap().break_jumps.push(jump);
+                Ok(())
+            }
+            Stmt::Continue { keyword } => {
+                self.line = keyword.line;
+                let loop_scope = match self.st.loop_contexts.last() {
+                    Some(ctx) => ctx.scope_depth,
+                    None => return Err(self.error("Can't use 'continue' outside of a loop.")),
+                };
+
+                let mut first_captured = None;
+                for (i, local) in self.st.locals.iter().enumerate() {
+                    if local.depth > loop_scope && local.captured {
+                        first_captured = Some(i as u8);
+                        break;
+                    }
+                }
+                if let Some(r) = first_captured {
+                    self.emit(RegOp::Close(r));
+                }
+
+                let jump = self.emit_jump(RegOp::Jump(0));
+                self.st.loop_contexts.last_mut().unwrap().continue_jumps.push(jump);
+                Ok(())
             }
             Stmt::Function { name, params, body } => self.fun_stmt(name, params, body),
             Stmt::Return { keyword, value } => {
