@@ -26,10 +26,6 @@ use rlox::vm::Vm;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
-// ---------------------------------------------------------------------------
-// Infraestructura de ejecucion y captura de salida
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Default)]
 struct SharedOutput(Arc<Mutex<Vec<u8>>>);
 
@@ -150,10 +146,6 @@ fn assert_all_backends_ok(source: &str, expected_stdout: &str) {
     assert_eq!(reg.stdout, expected_stdout, "RegVM stdout difiere");
 }
 
-// ---------------------------------------------------------------------------
-// Tests de ejecucion y semantica de break / continue
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_break_in_while() {
     let src = r#"
@@ -230,7 +222,6 @@ while (i < 10) {
 
 #[test]
 fn test_for_omitted_clauses() {
-    // 1. Sin inicializador
     let src1 = r#"
 var i = 0;
 for (; i < 3; i = i + 1) {
@@ -239,7 +230,6 @@ for (; i < 3; i = i + 1) {
 "#;
     assert_all_backends_ok(src1, "0\n1\n2\n");
 
-    // 2. Sin condicion
     let src2 = r#"
 for (var j = 0; ; j = j + 1) {
     if (j == 3) break;
@@ -248,7 +238,6 @@ for (var j = 0; ; j = j + 1) {
 "#;
     assert_all_backends_ok(src2, "0\n1\n2\n");
 
-    // 3. Sin incremento
     let src3 = r#"
 for (var k = 0; k < 3;) {
     print k;
@@ -257,7 +246,6 @@ for (var k = 0; k < 3;) {
 "#;
     assert_all_backends_ok(src3, "0\n1\n2\n");
 
-    // 4. Sin nada: for (;;)
     let src4 = r#"
 var count = 0;
 for (;;) {
@@ -341,7 +329,6 @@ for (var i = 0; i < 5; i = i + 1) {
 }
 print total;
 "#;
-    // Para i=0: 1+2+3=6. Para i=1: 6+6=12. Para i=2,3,4: continue
     assert_all_backends_ok(src, "12\n");
 }
 
@@ -416,7 +403,6 @@ while (x > 0) {
 }
 print x;
 "#;
-    // 100 -> 85 -> 70 -> 55 -> 40 (<=50 => break)
     assert_all_backends_ok(src, "40\n");
 }
 
@@ -432,7 +418,6 @@ for (var i = 1; i <= 5; i += 1) {
 }
 print acc;
 "#;
-    // i=1: acc=1; i=2: cont; i=3: acc=4; i=4: cont; i=5: acc=9
     assert_all_backends_ok(src, "9\n");
 }
 
@@ -463,10 +448,6 @@ print count;
 "#;
     assert_all_backends_ok(src, "1\n");
 }
-
-// ---------------------------------------------------------------------------
-// Tests de rechazo en Checker y Errores Sintacticos
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_checker_error_break_outside_loop() {

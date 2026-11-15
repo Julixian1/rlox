@@ -29,10 +29,6 @@ use rlox::vm::Vm;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
-// ---------------------------------------------------------------------------
-// Infraestructura de ejecución y captura de salida
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Default)]
 struct SharedOutput(Arc<Mutex<Vec<u8>>>);
 
@@ -247,10 +243,6 @@ fn assert_all_backends_runtime_error(source: &str, expected_substr: &str) {
     );
 }
 
-// ---------------------------------------------------------------------------
-// Tests funcionales
-// ---------------------------------------------------------------------------
-
 #[test]
 fn test_list_literals_and_display() {
     let src = r#"
@@ -454,10 +446,6 @@ print l2[0];
 "#;
     assert_all_backends_ok(src, "42\n0\n");
 }
-
-// ---------------------------------------------------------------------------
-// Tests de errores en tiempo de ejecución
-// ---------------------------------------------------------------------------
 
 #[test]
 fn test_error_index_negative() {

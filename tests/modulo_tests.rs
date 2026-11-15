@@ -18,10 +18,6 @@ use rlox::vm::Vm;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
-// ---------------------------------------------------------------------------
-// Infraestructura de ejecución y captura de salida
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Default)]
 struct SharedOutput(Arc<Mutex<Vec<u8>>>);
 
@@ -192,28 +188,20 @@ fn assert_all_backends_runtime_error(source: &str, expected_line: usize, expecte
     );
 }
 
-// ===========================================================================
-// 1. Números positivos
-// ===========================================================================
-
 #[test]
 fn test_modulo_positive_integers() {
     let source = "
-    // Division exacta (resto 0)
     print 10 % 5;
     print 12 % 4;
     print 7 % 7;
 
-    // Division con resto
     print 10 % 3;
     print 17 % 5;
     print 25 % 7;
 
-    // Dividendo menor que divisor
     print 3 % 10;
     print 1 % 5;
 
-    // Variables dinamicas (evita constant folding puro)
     var a = 37;
     var b = 6;
     print a % b;
@@ -222,27 +210,19 @@ fn test_modulo_positive_integers() {
     assert_all_backends_ok(source, expected);
 }
 
-// ===========================================================================
-// 2. Operandos negativos
-// ===========================================================================
-
 #[test]
 fn test_modulo_negative_operands() {
     let source = "
     // En semantica IEEE 754 / Rust f64 %, el signo del resto coincide con el dividendo
-    // Dividendo negativo, divisor positivo
     print -10 % 3;
     print -17 % 5;
 
-    // Dividendo positivo, divisor negativo
     print 10 % -3;
     print 17 % -5;
 
-    // Ambos negativos
     print -10 % -3;
     print -17 % -5;
 
-    // Variables dinamicas
     var x = -25;
     var y = 7;
     print x % y;
@@ -251,10 +231,6 @@ fn test_modulo_negative_operands() {
     let expected = "-1\n-2\n1\n2\n-1\n-2\n-4\n4\n";
     assert_all_backends_ok(source, expected);
 }
-
-// ===========================================================================
-// 3. Números decimales (punto flotante)
-// ===========================================================================
 
 #[test]
 fn test_modulo_floating_point() {
@@ -270,48 +246,34 @@ fn test_modulo_floating_point() {
     assert_all_backends_ok(source, expected);
 }
 
-// ===========================================================================
-// 4. Precedencia de operadores (+, -, *, /, %)
-// ===========================================================================
-
 #[test]
 fn test_modulo_precedence_with_arithmetic() {
     let source = "
-    // % tiene mayor precedencia que + y -
-    print 10 + 20 % 6;       // 10 + 2 = 12
-    print 20 % 6 + 10;       // 2 + 10 = 12
-    print 10 - 20 % 6;       // 10 - 2 = 8
-    print 20 % 6 - 1;        // 2 - 1 = 1
+    print 10 + 20 % 6;
+    print 20 % 6 + 10;
+    print 10 - 20 % 6;
+    print 20 % 6 - 1;
 
-    // % tiene misma precedencia que * y /, asociando a izquierda
-    print 10 * 7 % 4;        // (10 * 7) % 4 = 70 % 4 = 2
-    print 10 % 7 * 4;        // (10 % 7) * 4 = 3 * 4 = 12
-    print 10 / 2 % 3;        // (10 / 2) % 3 = 5 % 3 = 2
-    print 20 % 6 / 2;        // (20 % 6) / 2 = 2 / 2 = 1
+    print 10 * 7 % 4;
+    print 10 % 7 * 4;
+    print 10 / 2 % 3;
+    print 20 % 6 / 2;
 
-    // Parentesis alteran precedencia
-    print (10 + 20) % 7;     // 30 % 7 = 2
-    print 10 % (2 + 1);      // 10 % 3 = 1
-    print (10 * 7) % (2 + 2);// 70 % 4 = 2
+    print (10 + 20) % 7;
+    print 10 % (2 + 1);
+    print (10 * 7) % (2 + 2);
     ";
     let expected = "12\n12\n8\n1\n2\n12\n2\n1\n2\n1\n2\n";
     assert_all_backends_ok(source, expected);
 }
 
-// ===========================================================================
-// 5. Asociatividad a izquierda de %
-// ===========================================================================
-
 #[test]
 fn test_modulo_left_associativity() {
     let source = "
-    // (100 % 30) % 7 = 10 % 7 = 3 (si fuera a derecha: 100 % (30 % 7) = 100 % 2 = 0)
     print 100 % 30 % 7;
 
-    // ((50 % 16) % 5) % 2 = (2 % 5) % 2 = 2 % 2 = 0
     print 50 % 16 % 5 % 2;
 
-    // Evaluacion con variables
     var x = 100;
     var y = 30;
     var z = 7;
@@ -321,10 +283,6 @@ fn test_modulo_left_associativity() {
     assert_all_backends_ok(source, expected);
 }
 
-// ===========================================================================
-// 6. Casos especiales: Cero, NaN e Infinito
-// ===========================================================================
-
 #[test]
 fn test_modulo_zero_nan_infinity() {
     let source = "
@@ -333,22 +291,17 @@ fn test_modulo_zero_nan_infinity() {
     print -10 % 0;
     print 0 % 0;
 
-    // Cero como dividendo
     print 0 % 5;
     print 0 % -5;
 
-    // Infinito y NaN generados dinamicamente
     var inf = 1 / 0;
     var nan = 0 / 0;
 
-    // x % inf = x
     print 10 % inf;
     print -10 % inf;
 
-    // inf % x = NaN
     print inf % 5;
 
-    // Modulo con NaN siempre da NaN
     print nan % 5;
     print 5 % nan;
     print nan % nan;
@@ -356,10 +309,6 @@ fn test_modulo_zero_nan_infinity() {
     let expected = "NaN\nNaN\nNaN\n0\n0\n10\n-10\nNaN\nNaN\nNaN\nNaN\n";
     assert_all_backends_ok(source, expected);
 }
-
-// ===========================================================================
-// 7. Operandos inválidos (errores de tipo en runtime)
-// ===========================================================================
 
 #[test]
 fn test_modulo_invalid_operand_string_left() {
@@ -397,14 +346,9 @@ fn test_modulo_invalid_operand_nil() {
     assert_all_backends_runtime_error(source, 3, "Operands must be numbers.");
 }
 
-// ===========================================================================
-// 8. Uso de % en bucles y expresiones complejas
-// ===========================================================================
-
 #[test]
 fn test_modulo_in_loops_and_conditionals() {
     let source = "
-    // Filtrado de pares e impares en bucle
     var evens = 0;
     var odds = 0;
     for (var i = 1; i <= 10; i = i + 1) {
@@ -417,7 +361,6 @@ fn test_modulo_in_loops_and_conditionals() {
     print evens;
     print odds;
 
-    // Algoritmo de Euclides para MCD (Maximo Comun Divisor) usando %
     fun mcd(a, b) {
         while (b != 0) {
             var temp = b;
@@ -434,10 +377,6 @@ fn test_modulo_in_loops_and_conditionals() {
     assert_all_backends_ok(source, expected);
 }
 
-// ===========================================================================
-// 9. Compatibilidad con optimizaciones (Constant Folding en -O0 vs -O1 vs -O2)
-// ===========================================================================
-
 #[test]
 fn test_modulo_constant_folding_bytecode_and_parity() {
     let source = "
@@ -449,14 +388,14 @@ fn test_modulo_constant_folding_bytecode_and_parity() {
 
     let stmts = parse_and_check(source).unwrap();
 
-    // 1. En -O0: NO debe haber constant folding para %, debe emitirse OpCode::Modulo
+    // En -O0: NO debe haber constant folding para %, debe emitirse OpCode::Modulo
     let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
     assert!(
         find_opcode(&proto_o0, &|op| matches!(op, OpCode::Modulo)),
         "-O0 debio emitir OpCode::Modulo"
     );
 
-    // 2. En -O1 y -O2: Debe realizar Constant Folding para las operaciones con literales
+    // En -O1 y -O2: Debe realizar Constant Folding para las operaciones con literales
     let proto_o1 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O1)).unwrap();
     let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
 
@@ -469,7 +408,6 @@ fn test_modulo_constant_folding_bytecode_and_parity() {
         "-O2 debio plegar todas las operaciones de modulo constante"
     );
 
-    // 3. Salida identica entre -O0, -O1 y -O2
     let res_o0 = run_stack_vm(source, OptLevel::O0);
     let res_o1 = run_stack_vm(source, OptLevel::O1);
     let res_o2 = run_stack_vm(source, OptLevel::O2);

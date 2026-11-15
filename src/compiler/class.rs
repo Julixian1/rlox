@@ -1,3 +1,5 @@
+//! Representación de clases e instancias para el intérprete Tree-Walk.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
@@ -9,8 +11,11 @@ use crate::value::Value;
 /// Representa una clase definida por el usuario en Lox.
 #[derive(Clone)]
 pub struct LoxClass {
+    /// Nombre de la clase.
     pub name: String,
+    /// Superclase opcional de la que hereda.
     pub superclass: Option<Rc<RefCell<LoxClass>>>,
+    /// Tabla de métodos asociados a la clase.
     pub methods: HashMap<String, LoxFunction>,
 }
 
@@ -63,7 +68,9 @@ impl fmt::Debug for LoxClass {
 /// Representa una instancia concreta de una clase Lox en tiempo de ejecución.
 #[derive(Clone)]
 pub struct LoxInstance {
+    /// Clase a la que pertenece la instancia.
     pub class: Rc<RefCell<LoxClass>>,
+    /// Campos dinámicos y sus valores almacenados en la instancia.
     pub fields: HashMap<String, Value>,
 }
 

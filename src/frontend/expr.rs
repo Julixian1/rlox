@@ -1,3 +1,5 @@
+//! Nodos de expresión del AST y trait visitor para su procesamiento.
+
 use crate::token::Token;
 use std::fmt;
 
@@ -63,12 +65,16 @@ pub trait ExprVisitor<R> {
     ) -> R;
 }
 
-// Valores literales en el AST (distinto a token::Literal del scanner).
+/// Representa los valores literales presentes en los nodos del AST.
 #[derive(Debug, Clone, PartialEq)]
 pub enum LiteralValue {
+    /// Literal numérico en coma flotante.
     Number(f64),
+    /// Literal de cadena de texto.
     StringVal(String),
+    /// Literal booleano.
     Bool(bool),
+    /// Literal nulo `nil`.
     Nil,
 }
 
@@ -84,88 +90,107 @@ impl fmt::Display for LiteralValue {
     }
 }
 
-// Nodos de expresión del AST.
+/// Nodos del Árbol de Sintaxis Abstracta (AST) que representan expresiones evaluables.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
+    /// Expresión literal constante.
     Literal {
         value: LiteralValue,
     },
+    /// Operación unaria prefija (`-x`, `!y`).
     Unary {
         operator: Token,
         right: Box<Expr>,
     },
+    /// Operación binaria infija (`a + b`, `x == y`).
     Binary {
         left: Box<Expr>,
         operator: Token,
         right: Box<Expr>,
     },
+    /// Expresión agrupada entre paréntesis `(expr)`.
     Grouping {
         expression: Box<Expr>,
     },
+    /// Acceso a una variable por identificador.
     Variable {
         name: Token,
     },
+    /// Asignación a una variable (`x = expr`).
     Assign {
         name: Token,
         value: Box<Expr>,
     },
+    /// Asignación compuesta a una variable (`x += expr`, etc.).
     AssignModify {
         name: Token,
         operator: Token,
         value: Box<Expr>,
     },
+    /// Operador lógico con evaluación de cortocircuito (`and`, `or`).
     Logical {
         left: Box<Expr>,
         operator: Token,
         right: Box<Expr>,
     },
+    /// Llamada a función o método (`callee(arguments)`).
     Call {
         callee: Box<Expr>,
         paren: Token,
         arguments: Vec<Expr>,
     },
+    /// Acceso a propiedad de instancia (`object.name`).
     Get {
         object: Box<Expr>,
         name: Token,
     },
+    /// Asignación a propiedad de instancia (`object.name = value`).
     Set {
         object: Box<Expr>,
         name: Token,
         value: Box<Expr>,
     },
+    /// Asignación compuesta a propiedad de instancia (`object.name += value`, etc.).
     SetModify {
         object: Box<Expr>,
         name: Token,
         operator: Token,
         value: Box<Expr>,
     },
+    /// Referencia a la instancia receptora actual (`this`).
     This {
         keyword: Token,
     },
+    /// Acceso a método de la superclase (`super.method`).
     Super {
         keyword: Token,
         method: Token,
     },
+    /// Expresión condicional ternaria (`condition ? then_branch : else_branch`).
     Ternary {
         condition: Box<Expr>,
         then_branch: Box<Expr>,
         else_branch: Box<Expr>,
     },
+    /// Literal de lista (`[elem1, elem2, ...]`).
     List {
         bracket: Token,
         elements: Vec<Expr>,
     },
+    /// Acceso indexado a colección (`object[index]`).
     IndexGet {
         object: Box<Expr>,
         bracket: Token,
         index: Box<Expr>,
     },
+    /// Asignación indexada a colección (`object[index] = value`).
     IndexSet {
         object: Box<Expr>,
         bracket: Token,
         index: Box<Expr>,
         value: Box<Expr>,
     },
+    /// Asignación compuesta indexada (`object[index] += value`, etc.).
     IndexSetModify {
         object: Box<Expr>,
         bracket: Token,

@@ -1,3 +1,5 @@
+//! Intérprete Tree-Walk de Lox con resolución de variables y ejecución directa del AST.
+
 pub mod checker;
 pub mod environment;
 pub mod resolver;
@@ -15,10 +17,15 @@ use crate::stmt::{Stmt, StmtVisitor};
 use crate::token::{Token, TokenType};
 use crate::value::Value;
 
+/// Intérprete del lenguaje Lox que ejecuta sentencias y evalúa expresiones directamente sobre el AST.
 pub struct Interpreter {
+    /// Entorno global raíz donde residen las variables globales y funciones nativas.
     pub globals: Rc<RefCell<Environment>>,
+    /// Entorno léxico actualmente activo para la evaluación y resolución de variables.
     environment: Rc<RefCell<Environment>>,
+    /// Tabla que asocia cada puntero de nodo expresión con su distancia léxica resuelta.
     locals: HashMap<*const Expr, usize>,
+    /// Flujo de salida utilizado para emitir mensajes (por defecto `io::stdout()`).
     out: Box<dyn Write + Send>,
 }
 
@@ -382,12 +389,10 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
         superclass: &Option<Expr>,
         methods: &[Stmt],
     ) -> Result<(), ReturnSignal> {
-        // 1. Placeholder del nombre en el entorno actual
         self.environment
             .borrow_mut()
             .define(name.lexeme.clone(), Value::Nil);
 
-        // 2. Evaluar y validar la superclase (si existe)
         let evaluated_superclass = if let Some(superclass_expr) = superclass {
             let superclass_token = match superclass_expr {
                 Expr::Variable { name } => name,
@@ -407,7 +412,6 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
             None
         };
 
-        // 3. Creación del entorno léxico de 'super' (si es subclase)
         let superclass_env = if let Some(ref super_rc) = evaluated_superclass {
             let env = Rc::new(RefCell::new(Environment::new_enclosed(
                 self.environment.clone(),
@@ -419,7 +423,6 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
             None
         };
 
-        // 4. Compilación de métodos con la clausura correspondiente
         let method_closure = superclass_env.as_ref().unwrap_or(&self.environment).clone();
         let mut methods_map = HashMap::new();
         for method in methods {
@@ -441,10 +444,8 @@ impl StmtVisitor<Result<(), ReturnSignal>> for Interpreter {
             }
         }
 
-        // 5. Instanciar la clase LoxClass
         let klass = LoxClass::new(name.lexeme.clone(), evaluated_superclass, methods_map);
 
-        // 6. Asignar la clase final reemplazando el placeholder
         self.environment
             .borrow_mut()
             .assign(name, Value::Class(Rc::new(RefCell::new(klass))))
@@ -718,7 +719,6 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             ))
         })?;
 
-        // 1. Obtener superclase a la distancia resuelta
         let superclass_val = self
             .environment
             .borrow()
@@ -734,7 +734,6 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             }
         };
 
-        // 2. Obtener la instancia ('this') exactamente un nivel más cerca (distance - 1)
         let this_distance = distance.checked_sub(1).ok_or_else(|| {
             ReturnSignal::Error(format!(
                 "[line {}] Internal error: invalid lexical distance for 'super'.",
@@ -756,7 +755,6 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
             }
         };
 
-        // 3. Buscar método en la superclase (búsqueda recursiva)
         let method_fn = superclass
             .borrow()
             .find_method(&method.lexeme)
@@ -767,7 +765,6 @@ impl ExprVisitor<Result<Value, ReturnSignal>> for Interpreter {
                 ))
             })?;
 
-        // 4. Ligar a la instancia receptora
         Ok(Value::Function(Rc::new(method_fn.bind(instance))))
     }
 

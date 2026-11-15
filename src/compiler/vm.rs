@@ -1,3 +1,5 @@
+//! Máquina virtual basada en pila (Stack VM) y bucle de interpretación de bytecode.
+
 use crate::chunk::{Chunk, OpCode};
 use crate::closure::{CallFrame, Closure, FnProto, Upvalue, UpvalueRef};
 use crate::value::Value;
@@ -9,38 +11,57 @@ use std::rc::Rc;
 
 const FRAMES_MAX: usize = 100_000;
 
+/// Objeto invocable resuelto de forma anticipada para optimización de llamadas de métodos o campos.
 #[derive(Debug, Clone)]
 enum PreparedCallable {
+    /// Método de clase optimizado.
     Method(Rc<Closure>),
+    /// Campo o propiedad que almacena un valor invocable.
     Field(Value),
 }
 
+/// Estado de invocación preparado pendiente de ejecutarse con sus argumentos.
 #[derive(Debug, Clone)]
 struct PreparedCall {
+    /// Invocable resuelto (método o campo).
     callable: PreparedCallable,
+    /// Profundidad del marco de llamada al momento de la preparación.
     frame_depth: usize,
+    /// Ranura de pila del receptor (`this`).
     receiver_slot: usize,
 }
 
+/// Máquina virtual basada en pila para la ejecución de bytecode de Lox.
 pub struct Vm<W: Write> {
+    /// Pila de operandos y variables locales.
     stack: Vec<Value>,
+    /// Pila de marcos de llamada de funciones (`CallFrame`).
     frames: Vec<CallFrame>,
+    /// Tabla de nombres de variables globales mapeadas a índices en `global_values`.
     global_names: HashMap<String, usize>,
+    /// Valores de variables globales indexadas.
     global_values: Vec<Option<Value>>,
+    /// Desplazamientos base para Inline Caches por identificador de prototipo.
     proto_ic_offsets: HashMap<usize, usize>,
+    /// Ranuras de almacenamiento de Inline Caches.
     ic_slots: Vec<u32>,
+    /// Lista de upvalues abiertos que apuntan a ranuras de la pila.
     open_upvalues: Vec<UpvalueRef>,
+    /// Pila de llamadas a métodos preparadas pendientes de ejecución.
     prepared_calls: Vec<PreparedCall>,
+    /// Flujo de salida donde se dirigen las escrituras (ej. `print`).
     out: W,
 }
 
 impl Vm<io::Stdout> {
+    /// Crea una nueva máquina virtual con salida estándar (`io::stdout`).
     pub fn new() -> Self {
         Self::with_output(io::stdout())
     }
 }
 
 impl<W: Write> Vm<W> {
+    /// Crea una nueva máquina virtual con un flujo de salida configurable e inicializa las funciones nativas.
     pub fn with_output(out: W) -> Self {
         let mut vm = Vm {
             stack: Vec::with_capacity(256),
@@ -90,6 +111,7 @@ impl<W: Write> Vm<W> {
         vm
     }
 
+    /// Consume la máquina virtual retornando el flujo de salida subyacente.
     pub fn into_output(self) -> W {
         self.out
     }
@@ -108,6 +130,7 @@ impl<W: Write> Vm<W> {
         }
     }
 
+    /// Interpreta un prototipo compilado ejecutándolo hasta su finalización.
     pub fn interpret(&mut self, script: Rc<FnProto>) -> Result<(), String> {
         self.reset();
         let closure = Rc::new(Closure::new(script));
@@ -236,6 +259,7 @@ impl<W: Write> Vm<W> {
         Ok(())
     }
 
+    /// Bucle principal de ejecución que despacha e interpreta las instrucciones de bytecode.
     fn run(&mut self) -> Result<(), String> {
         let mut closure = Rc::clone(&self.frames.last().expect("no hay frame").closure);
         let mut ip = 0;

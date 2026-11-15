@@ -26,10 +26,6 @@ use rlox::vm::Vm;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
-// ---------------------------------------------------------------------------
-// Infraestructura de ejecucion y captura de salida
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Default)]
 struct SharedOutput(Arc<Mutex<Vec<u8>>>);
 
@@ -150,10 +146,6 @@ fn assert_all_backends_ok(source: &str, expected_stdout: &str) {
     assert_eq!(reg.stdout, expected_stdout, "Register VM stdout no coincide");
 }
 
-// ===========================================================================
-// 1. Evaluacion basica y verdad/falsedad (Truthiness)
-// ===========================================================================
-
 #[test]
 fn test_ternary_basic_true_false() {
     let source = r#"
@@ -169,19 +161,14 @@ fn test_ternary_basic_true_false() {
 #[test]
 fn test_ternary_truthiness_rules() {
     let source = r#"
-        // nil es falsy
         print nil ? "si" : "no";
 
-        // false es falsy
         print false ? "si" : "no";
 
-        // 0 es truthy en Lox
         print 0 ? "cero truthy" : "fallo";
 
-        // Cadena vacia es truthy en Lox
         print "" ? "vacio truthy" : "fallo";
 
-        // Cadenas y numeros son truthy
         print "hola" ? "texto truthy" : "fallo";
         print 42 ? "numero truthy" : "fallo";
     "#;
@@ -202,10 +189,6 @@ fn test_ternary_various_return_types() {
     assert_all_backends_ok(source, "123\nb\nnil\ntrue\n");
 }
 
-// ===========================================================================
-// 2. Evaluacion condicional estricta (Short-circuit)
-// ===========================================================================
-
 #[test]
 fn test_ternary_short_circuit_side_effects() {
     let source = r#"
@@ -222,7 +205,6 @@ fn test_ternary_short_circuit_side_effects() {
         print false ? incrementar() : incrementar();
         print contador;
     "#;
-    // En cada ternario, solo la rama correspondiente debe ejecutarse
     assert_all_backends_ok(source, "1\n1\n2\n2\n");
 }
 
@@ -257,22 +239,15 @@ fn test_ternary_single_condition_evaluation() {
     assert_all_backends_ok(source, "si\n1\n");
 }
 
-// ===========================================================================
-// 3. Precedencia y asociatividad
-// ===========================================================================
-
 #[test]
 fn test_ternary_right_associativity() {
     let source = r#"
-        // false ? 1 : (true ? 2 : 3) => 2
         var resultado = false ? 1 : true ? 2 : 3;
         print resultado;
 
-        // false ? 1 : (false ? 2 : 3) => 3
         var r2 = false ? 1 : false ? 2 : 3;
         print r2;
 
-        // false ? 1 : (false ? 2 : (true ? 4 : 5)) => 4
         var r3 = false ? 1 : false ? 2 : true ? 4 : 5;
         print r3;
     "#;
@@ -301,10 +276,8 @@ fn test_ternary_precedence_with_arithmetic_and_comparisons() {
         var edad = 20;
         print edad >= 18 ? "Mayor" : "Menor";
 
-        // Aritmetica en la condicion: 2 + 3 == 5 es true
         print 2 + 3 == 5 ? "suma ok" : "suma mal";
 
-        // Aritmetica en las ramas
         print true ? 10 + 5 * 2 : 0;
     "#;
     assert_all_backends_ok(source, "20\nMayor\nsuma ok\n20\n");
@@ -313,14 +286,10 @@ fn test_ternary_precedence_with_arithmetic_and_comparisons() {
 #[test]
 fn test_ternary_precedence_with_logical_operators() {
     let source = r#"
-        // 'or' y 'and' tienen mayor precedencia que '?'
-        // false or true ? 10 : 20 => (false or true) ? 10 : 20 => 10
         print false or true ? 10 : 20;
 
-        // true and false ? 10 : 20 => (true and false) ? 10 : 20 => 20
         print true and false ? 10 : 20;
 
-        // Logica dentro de las ramas
         print true ? false or true : false and true;
     "#;
     assert_all_backends_ok(source, "10\n20\ntrue\n");
@@ -332,31 +301,23 @@ fn test_ternary_interaction_with_assignments() {
         var a = 0;
         var b = 0;
 
-        // Asignacion simple que recibe el resultado del ternario
         a = true ? 10 : 20;
         print a;
 
-        // Asignacion compuesta que recibe el resultado del ternario
         a += false ? 10 : 5;
         print a;
 
-        // Asignaciones dentro de las ramas parentizadas
         true ? (b = 5) : (b = 10);
         print b;
 
         false ? (b = 100) : (b = 50);
         print b;
 
-        // Asignaciones compuestas dentro de las ramas
         true ? (b += 20) : (b += 200);
         print b;
     "#;
     assert_all_backends_ok(source, "10\n15\n5\n50\n70\n");
 }
-
-// ===========================================================================
-// 4. Funciones, Recursion y Bucles
-// ===========================================================================
 
 #[test]
 fn test_ternary_in_recursion_factorial_and_fibonacci() {
@@ -412,10 +373,6 @@ fn test_ternary_in_closures() {
     "#;
     assert_all_backends_ok(source, "alto\nbajo\n");
 }
-
-// ===========================================================================
-// 5. Errores sintacticos
-// ===========================================================================
 
 #[test]
 fn test_ternary_syntax_error_missing_colon() {

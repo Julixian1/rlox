@@ -15,6 +15,7 @@ pub enum OptLevel {
 }
 
 impl OptLevel {
+    /// Parsea una cadena de texto (ej. `"0"`, `"O1"`, `"-O2"`) al nivel de optimización correspondiente.
     pub fn parse(s: &str) -> Option<Self> {
         match s {
             "0" | "O0" | "-O0" => Some(OptLevel::O0),
@@ -28,16 +29,24 @@ impl OptLevel {
 /// Identificador de optimizaciones individuales configurables.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum OptPass {
+    /// Plegado de constantes estático en tiempo de compilación.
     ConstantFolding,
+    /// Eliminación de código inalcanzable tras retornos o condiciones conocidas.
     DeadCodeElimination,
+    /// Simplificación y encadenamiento (threading) de saltos.
     JumpSimplification,
+    /// Optimizaciones de ventana corta (peephole) sobre secuencias de instrucciones.
     Peephole,
+    /// Fusión de secuencias frecuentes en superinstrucciones especializadas.
     Superinstructions,
+    /// Cachés en línea para invocaciones directas de métodos.
     InlineCaches,
+    /// Acceso rápido indexado a variables globales mediante tabla fija.
     IndexedGlobals,
 }
 
 impl OptPass {
+    /// Parsea el nombre o alias de un pase de optimización a su variante `OptPass`.
     pub fn parse(name: &str) -> Option<Self> {
         match name.to_ascii_lowercase().as_str() {
             "fold" | "folding" | "constant-folding" => Some(OptPass::ConstantFolding),
@@ -51,6 +60,7 @@ impl OptPass {
         }
     }
 
+    /// Retorna el identificador canónico en texto de la optimización.
     pub fn name(&self) -> &'static str {
         match self {
             OptPass::ConstantFolding => "fold",
@@ -67,13 +77,21 @@ impl OptPass {
 /// Configuración detallada de optimizaciones del compilador.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OptConfig {
+    /// Nivel base de optimización (`-O0`, `-O1`, `-O2`).
     pub level: OptLevel,
+    /// Habilita el plegado de constantes.
     pub constant_folding: bool,
+    /// Habilita la eliminación de código muerto.
     pub dead_code_elimination: bool,
+    /// Habilita la simplificación y compactación de saltos.
     pub jump_simplification: bool,
+    /// Habilita optimizaciones peephole.
     pub peephole: bool,
+    /// Habilita superinstrucciones especializadas.
     pub superinstructions: bool,
+    /// Habilita inline caches e invocaciones directas.
     pub inline_caches: bool,
+    /// Habilita resolución indexada rápida de globales.
     pub indexed_globals: bool,
 }
 

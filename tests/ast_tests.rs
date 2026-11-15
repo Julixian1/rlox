@@ -17,7 +17,6 @@ fn test_expr_display_formatting() {
     let minus_token = Token::new(TokenType::Minus, "-".to_string(), None, 1);
     let star_token = Token::new(TokenType::Star, "*".to_string(), None, 1);
 
-    // Representa (-123) * (45.67) en formato prefijo -> (* (- 123) 45.67)
     let expression = Expr::Binary {
         left: Box::new(Expr::Unary {
             operator: minus_token,

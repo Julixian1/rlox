@@ -1,3 +1,5 @@
+//! Analizador sintáctico (Parser) descendente recursivo y combinador con Pratt para expresiones.
+
 use crate::expr::Expr;
 use crate::stmt::Stmt;
 use crate::token::{Token, TokenType};
@@ -5,8 +7,11 @@ use crate::token::{Token, TokenType};
 mod pratt;
 use pratt::Precedence;
 
+/// Analizador sintáctico que procesa una secuencia de tokens y produce el AST correspondiente.
 pub struct Parser {
+    /// Secuencia de tokens de entrada a parsear.
     tokens: Vec<Token>,
+    /// Posición del token actual en la secuencia.
     current: usize,
 }
 
@@ -15,8 +20,6 @@ impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser { tokens, current: 0 }
     }
-
-    // HELPERS
 
     /// Retorna una referencia al token actual sin consumirlo.
     fn peek(&self) -> &Token {
@@ -121,8 +124,6 @@ impl Parser {
             self.advance();
         }
     }
-
-    // DECLARATIONS
 
     /// Parsea una declaración (clase, función, variable o sentencia).
     fn declaration(&mut self) -> Result<Stmt, String> {
@@ -231,8 +232,6 @@ impl Parser {
         Ok(Stmt::Var { name, initializer })
     }
 
-    // STATEMENTS
-
     /// Parsea una sentencia según la palabra clave inicial (print, bloque, if, while, for, return o expresión).
     fn statement(&mut self) -> Result<Stmt, String> {
         if self.match_token(&[TokenType::Print]) {
@@ -329,7 +328,6 @@ impl Parser {
     fn for_statement(&mut self) -> Result<Stmt, String> {
         self.consume(&TokenType::LeftParen, "Expected '(' after 'for'.")?;
 
-        // Inicializador
         let initializer = if self.match_token(&[TokenType::Semicolon]) {
             None
         } else if self.match_token(&[TokenType::Var]) {
@@ -338,7 +336,6 @@ impl Parser {
             Some(Box::new(self.expression_statement()?))
         };
 
-        // Condición
         let condition = if !self.check(&TokenType::Semicolon) {
             Some(self.expression()?)
         } else {
@@ -346,7 +343,6 @@ impl Parser {
         };
         self.consume(&TokenType::Semicolon, "Expected ';' after loop condition.")?;
 
-        // Incremento
         let increment = if !self.check(&TokenType::RightParen) {
             Some(self.expression()?)
         } else {
@@ -354,7 +350,6 @@ impl Parser {
         };
         self.consume(&TokenType::RightParen, "Expected ')' after for clauses.")?;
 
-        // Body
         let body = Box::new(self.statement()?);
 
         Ok(Stmt::For {
@@ -379,6 +374,7 @@ impl Parser {
         Ok(Stmt::Continue { keyword })
     }
 
+    /// Parsea una sentencia de retorno (`return expr;`).
     fn return_statement(&mut self) -> Result<Stmt, String> {
         let keyword = self.previous().clone();
 
@@ -392,8 +388,6 @@ impl Parser {
 
         Ok(Stmt::Return { keyword, value })
     }
-
-    // EXPRESSIONS
 
     /// Punto de entrada para parsear expresiones. Delega a `assignment`.
     fn expression(&mut self) -> Result<Expr, String> {

@@ -27,10 +27,6 @@ use rlox::vm::Vm;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
-// ---------------------------------------------------------------------------
-// Infraestructura de ejecución y captura de salida
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Default)]
 struct SharedOutput(Arc<Mutex<Vec<u8>>>);
 
@@ -242,10 +238,6 @@ fn assert_class_backends_runtime_error(source: &str, expected_line: usize, expec
     );
 }
 
-// ===========================================================================
-// 1. Operadores basicos sobre variables globales y locales
-// ===========================================================================
-
 #[test]
 fn test_compound_assign_all_operators_global() {
     let source = r#"
@@ -321,10 +313,6 @@ fn test_compound_assign_modulo_negative_and_floats() {
     assert_all_backends_ok(source, "-1\n1\n0\nNaN\n");
 }
 
-// ===========================================================================
-// 2. Variables capturadas por clausuras (Upvalues)
-// ===========================================================================
-
 #[test]
 fn test_compound_assign_closure_upvalue() {
     let source = r#"
@@ -372,10 +360,6 @@ fn test_compound_assign_multiple_closures_share_upvalue() {
     assert_all_backends_ok(source, "130\n");
 }
 
-// ===========================================================================
-// 3. Valor de retorno y asignaciones encadenadas
-// ===========================================================================
-
 #[test]
 fn test_compound_assign_return_value() {
     let source = r#"
@@ -400,7 +384,6 @@ fn test_compound_assign_chained() {
         print a;
         print b;
     "#;
-    // b += 3 => 8, luego a += 8 => 18
     assert_all_backends_ok(source, "18\n8\n");
 }
 
@@ -415,8 +398,6 @@ fn test_compound_assign_precedence_and_grouping() {
         y -= 4 / 2;
         print y;
     "#;
-    // x += (2 * 3) => 10 + 6 = 16
-    // y -= (4 / 2) => 20 - 2 = 18
     assert_all_backends_ok(source, "16\n18\n");
 }
 
@@ -439,10 +420,6 @@ fn test_compound_assign_in_loops() {
     "#;
     assert_all_backends_ok(source, "15\n24\n");
 }
-
-// ===========================================================================
-// 4. Propiedades de instancias (Clases)
-// ===========================================================================
 
 #[test]
 fn test_compound_assign_property_basic() {
@@ -502,10 +479,6 @@ fn test_compound_assign_property_return_value() {
     assert_class_backends_ok(source, "75\n75\n");
 }
 
-// ===========================================================================
-// 5. Evaluacion unica del receptor (Requisito fundamental)
-// ===========================================================================
-
 #[test]
 fn test_compound_assign_single_receiver_evaluation() {
     let source = r#"
@@ -563,10 +536,6 @@ fn test_compound_assign_receiver_and_value_evaluation_order() {
     // Resultado: 125
     assert_class_backends_ok(source, "receiver\nvalue\n125\n");
 }
-
-// ===========================================================================
-// 6. Manejo de errores y semantica estricta de orden
-// ===========================================================================
 
 #[test]
 fn test_compound_assign_error_on_non_instance_receiver() {
@@ -639,13 +608,11 @@ fn test_compound_assign_invalid_operand_types() {
 
 #[test]
 fn test_compound_assign_invalid_assignment_targets() {
-    // Literal como destino
     let source1 = "1 += 2;";
     let res1 = parse_and_check(source1);
     assert!(res1.is_err());
     assert!(res1.unwrap_err().contains("Invalid assignment target."));
 
-    // Expresión binaria agrupada como destino
     let source2 = "(a + b) += 1;";
     let res2 = parse_and_check(source2);
     assert!(res2.is_err());

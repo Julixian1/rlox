@@ -10,8 +10,6 @@ fn check_source(source: &str) -> Vec<String> {
     checker::check(&statements)
 }
 
-// ---- variables duplicadas ---------------------------------------------------
-
 #[test]
 fn test_checker_error_redefining_variable_in_same_scope() {
     let errors = check_source(
@@ -51,8 +49,6 @@ fn test_checker_duplicate_parameters() {
     assert!(errors[0].contains("Already a variable with this name in this scope."));
 }
 
-// ---- lectura en el propio inicializador -------------------------------------
-
 #[test]
 fn test_checker_error_read_in_own_initializer() {
     let errors = check_source(
@@ -89,8 +85,6 @@ fn test_checker_reading_another_variable_in_initializer_is_fine() {
 fn test_checker_function_can_call_itself() {
     assert!(check_source("{ fun f() { f(); } }").is_empty());
 }
-
-// ---- return ----------------------------------------------------------------
 
 #[test]
 fn test_checker_error_return_from_top_level() {
@@ -137,8 +131,6 @@ fn test_checker_return_after_a_function_is_top_level_again() {
     assert_eq!(errors.len(), 1);
     assert!(errors[0].contains("Can't return from top-level code."));
 }
-
-// ---- varias pasadas juntas ---------------------------------------------------
 
 #[test]
 fn test_checker_reports_errors_from_every_pass() {

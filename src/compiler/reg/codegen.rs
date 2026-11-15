@@ -1,3 +1,5 @@
+//! Generador de código (codegen) del AST a bytecode basado en registros para la Register VM.
+
 use super::chunk::{RegChunk, RegOp};
 use super::closure::RegProto;
 use crate::closure::UpvalueDesc;
@@ -9,34 +11,49 @@ use std::rc::Rc;
 
 type CResult = Result<(), String>;
 
-/// Un local vive en el registro que coincide con su posición en `locals`.
+/// Variable local activa asociada a un registro virtual coincidente con su índice.
 struct Local {
+    /// Nombre identificador de la variable local.
     name: String,
+    /// Profundidad del bloque de ámbito léxico.
     depth: usize,
+    /// Indica si la variable local fue capturada como upvalue por una clausura interna.
     captured: bool,
 }
 
+/// Contexto de control de bucles activos (`while` y `for`) en el compilador de registros.
 #[derive(Clone)]
 struct RegLoopContext {
+    /// Profundidad de ámbito en la que se inició el bucle.
     scope_depth: usize,
+    /// Desplazamientos de saltos pendientes generados por sentencias `break`.
     break_jumps: Vec<usize>,
+    /// Desplazamientos de saltos pendientes generados por sentencias `continue`.
     continue_jumps: Vec<usize>,
 }
 
-/// Estado de la función que se está compilando.
+/// Estado de compilación y asignación de registros para una función o script.
 struct FnState {
+    /// Nombre opcional de la función.
     name: Option<String>,
+    /// Cantidad de parámetros formales de la función.
     arity: usize,
+    /// Fragmento de código compilado en construcción.
     chunk: RegChunk,
+    /// Variables locales activas mapeadas a registros iniciales.
     locals: Vec<Local>,
+    /// Descriptores de variables capturadas (upvalues).
     upvalues: Vec<UpvalueDesc>,
+    /// Profundidad actual del ámbito léxico.
     scope_depth: usize,
     /// Primer registro libre. Los registros `0..locals.len()` son locales.
     free_reg: usize,
+    /// Pila de contextos de bucle anidados activos en la función.
     loop_contexts: Vec<RegLoopContext>,
 }
 
 impl FnState {
+    /// Inicializa un nuevo estado de compilación para una función o script.
     fn new(name: Option<String>, scope_depth: usize) -> Self {
         FnState {
             name,
@@ -50,6 +67,7 @@ impl FnState {
         }
     }
 
+    /// Registra un nuevo upvalue en el prototipo o reutiliza uno existente.
     fn add_upvalue(&mut self, desc: UpvalueDesc) -> u16 {
         match self.upvalues.iter().position(|u| *u == desc) {
             Some(i) => i as u16,
@@ -60,6 +78,7 @@ impl FnState {
         }
     }
 
+    /// Consume el estado convirtiéndolo en un `RegProto` finalizado.
     fn into_proto(self) -> RegProto {
         RegProto {
             name: self.name,
@@ -70,17 +89,23 @@ impl FnState {
     }
 }
 
+/// Compilador que traduce el AST a instrucciones de bytecode basadas en registros.
 struct RegCompiler {
+    /// Estado de compilación de la función actualmente en procesamiento.
     st: FnState,
+    /// Pila de estados de funciones envolventes (padres).
     enclosing: Vec<FnState>,
+    /// Número de línea del código fuente actual.
     line: usize,
 }
 
+/// Compila una secuencia de sentencias del AST en un prototipo ejecutable para la Register VM.
 pub fn compile(statements: &[Stmt]) -> Result<Rc<RegProto>, String> {
     RegCompiler::new().compile(statements)
 }
 
 impl RegCompiler {
+    /// Crea un nuevo compilador de registros para el script principal.
     fn new() -> Self {
         RegCompiler {
             st: FnState::new(None, 0),
@@ -89,6 +114,7 @@ impl RegCompiler {
         }
     }
 
+    /// Compila todas las sentencias emitiendo un retorno implícito al finalizar.
     fn compile(mut self, statements: &[Stmt]) -> Result<Rc<RegProto>, String> {
         for stmt in statements {
             self.stmt(stmt)?;
@@ -97,6 +123,7 @@ impl RegCompiler {
         Ok(Rc::new(self.st.into_proto()))
     }
 
+    /// Emite la carga de `nil` y la instrucción de retorno final.
     fn emit_implicit_return(&mut self) -> CResult {
         let r = self.alloc_reg()?;
         self.emit(RegOp::LoadNil(r));
@@ -104,17 +131,18 @@ impl RegCompiler {
         Ok(())
     }
 
-    // ---- helpers de emisión --------------------------------------------
-
+    /// Añade una instrucción de registro al chunk actual registrando la línea.
     fn emit(&mut self, op: RegOp) -> usize {
         let line = self.line;
         self.st.chunk.write(op, line)
     }
 
+    /// Formatea un mensaje de error asociándolo a la línea actual.
     fn error(&self, msg: &str) -> String {
         format!("[line {}] Error: {}", self.line, msg)
     }
 
+    /// Agrega una constante al chunk actual retornando su índice.
     fn make_constant(&mut self, value: Value) -> Result<u16, String> {
         let result = self.st.chunk.add_constant(value);
         result.map_err(|_| self.error("Too many constants in one chunk."))
@@ -148,8 +176,6 @@ impl RegCompiler {
         let result = self.st.chunk.emit_loop(loop_start, line);
         result.map_err(|_| self.error("Loop body too large."))
     }
-
-    // ---- registros y scopes --------------------------------------------
 
     fn alloc_reg(&mut self) -> Result<u8, String> {
         if self.st.free_reg > u8::MAX as usize {
@@ -235,8 +261,6 @@ impl RegCompiler {
         }
         self.st.free_reg = self.st.locals.len();
     }
-
-    // ---- sentencias ------------------------------------------------------
 
     fn stmt(&mut self, s: &Stmt) -> CResult {
         debug_assert_eq!(self.st.free_reg, self.st.locals.len());
@@ -562,8 +586,6 @@ impl RegCompiler {
         self.st.free_reg = saved;
         Ok(())
     }
-
-    // ---- expresiones -------------------------------------------------------
 
     fn operand(&mut self, e: &Expr) -> Result<u8, String> {
         self.operand_before(e, None)

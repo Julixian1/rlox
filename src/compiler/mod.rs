@@ -1,3 +1,5 @@
+//! Compilador de AST a bytecode para la máquina virtual basada en pila (Stack VM).
+
 pub mod chunk;
 pub mod class;
 pub mod closure;
@@ -21,38 +23,58 @@ pub use opt::{OptConfig, OptLevel, OptPass};
 
 type CResult = Result<(), String>;
 
+/// Registro de una variable local activa en el compilador de la Stack VM.
 #[derive(Clone)]
 struct Local {
+    /// Nombre identificador de la variable local.
     name: String,
+    /// Profundidad de anidamiento de bloques de ámbito léxico.
     depth: usize,
+    /// Indica si la variable local fue capturada por una clausura interna.
     is_captured: bool,
 }
 
+/// Tipo o rol sintáctico de la función en compilación.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FnKind {
+    /// Código a nivel de script principal.
     Script,
+    /// Función declarada por el usuario.
     Function,
+    /// Método de instancia de una clase.
     Method,
+    /// Método inicializador (`init`) de una clase.
     Initializer,
 }
 
+/// Contexto de control para bucles activos (`while` y `for`).
 #[derive(Clone)]
 struct LoopContext {
+    /// Profundidad de ámbito en la que se inició el bucle.
     scope_depth: usize,
+    /// Desplazamientos de saltos pendientes generados por sentencias `break`.
     break_jumps: Vec<usize>,
+    /// Desplazamientos de saltos pendientes generados por sentencias `continue`.
     continue_jumps: Vec<usize>,
 }
 
+/// Estado léxico y de generación de código correspondiente a una función individual.
 #[derive(Clone)]
 struct FnState {
+    /// Prototipo de función en construcción.
     proto: FnProto,
+    /// Lista de variables locales activas en la función.
     locals: Vec<Local>,
+    /// Profundidad actual del ámbito léxico.
     scope_depth: usize,
+    /// Tipo o rol sintáctico de la función.
     kind: FnKind,
+    /// Pila de contextos de bucle actualmente anidados dentro de la función.
     loop_contexts: Vec<LoopContext>,
 }
 
 impl FnState {
+    /// Inicializa el estado de compilación para una función o script.
     fn new(name: Option<String>, kind: FnKind) -> Self {
         let slot0_name = match kind {
             FnKind::Method | FnKind::Initializer => "this".to_string(),
@@ -71,43 +93,59 @@ impl FnState {
         }
     }
 
+    /// Busca una variable local por nombre recorriendo desde el ámbito más interno.
     fn resolve_local(&self, name: &str) -> Option<usize> {
         self.locals.iter().rposition(|l| l.name == name)
     }
 }
 
+/// Clasificación de acceso a una variable resuelta.
 enum Var {
+    /// Variable local en la ranura de pila indicada.
     Local(u16),
+    /// Variable capturada (upvalue) en el índice indicado.
     Upvalue(u16),
+    /// Variable global resuelta en tiempo de ejecución por nombre.
     Global,
 }
 
+/// Estado de compilación para la declaración de una clase.
 #[derive(Clone)]
 struct ClassState {
+    /// Indica si la clase declara explícitamente una superclase.
     has_superclass: bool,
 }
 
+/// Compilador que traduce el AST en fragmentos de bytecode para la Stack VM.
 #[derive(Clone)]
 pub struct Compiler {
+    /// Pila de estados de funciones anidadas.
     fns: Vec<FnState>,
+    /// Pila de estados de clases en compilación.
     classes: Vec<ClassState>,
+    /// Número de línea actual para asociar al bytecode.
     line: usize,
+    /// Configuración de pasadas de optimización activas.
     pub opt: OptConfig,
 }
 
+/// Compila una secuencia de sentencias del AST a un prototipo ejecutable con optimizaciones por defecto.
 pub fn compile(statements: &[Stmt]) -> Result<Rc<FnProto>, String> {
     Compiler::new().compile(statements)
 }
 
+/// Compila una secuencia de sentencias del AST aplicando la configuración de optimizaciones indicada.
 pub fn compile_with_opt(statements: &[Stmt], opt: OptConfig) -> Result<Rc<FnProto>, String> {
     Compiler::with_opt(opt).compile(statements)
 }
 
 impl Compiler {
+    /// Crea un compilador con optimizaciones por defecto.
     pub fn new() -> Self {
         Self::with_opt(OptConfig::default())
     }
 
+    /// Crea un compilador configurado con el nivel y pasadas de optimización especificadas.
     pub fn with_opt(opt: OptConfig) -> Self {
         Compiler {
             fns: vec![FnState::new(None, FnKind::Script)],
@@ -117,6 +155,7 @@ impl Compiler {
         }
     }
 
+    /// Compila la lista de sentencias completando la emisión con retorno y aplicando optimizaciones finales.
     pub fn compile(mut self, statements: &[Stmt]) -> Result<Rc<FnProto>, String> {
         self.compile_stmt_sequence(statements)?;
         self.emit(OpCode::Nil);
@@ -528,6 +567,7 @@ impl Compiler {
     }
 }
 
+/// Determina si un valor corresponde a un literal básico primitivo seguro para plegado de constantes.
 fn is_safe_literal(val: &Value) -> bool {
     matches!(
         val,
@@ -535,6 +575,7 @@ fn is_safe_literal(val: &Value) -> bool {
     )
 }
 
+/// Intenta extraer el token identificador si la expresión dada es una variable (desenvolviendo agrupamientos).
 fn extract_var_name(expr: &Expr) -> Option<&Token> {
     match expr {
         Expr::Variable { name } => Some(name),
@@ -543,6 +584,7 @@ fn extract_var_name(expr: &Expr) -> Option<&Token> {
     }
 }
 
+/// Intenta extraer el valor constante directo si la expresión es un literal (desenvolviendo agrupamientos).
 fn extract_literal(expr: &Expr) -> Option<Value> {
     match expr {
         Expr::Literal { value } => match value {
@@ -556,6 +598,7 @@ fn extract_literal(expr: &Expr) -> Option<Value> {
     }
 }
 
+/// Desenuelve expresiones de agrupamiento sucesivas retornando la expresión interna subyacente.
 fn unwrap_grouping(expr: &Expr) -> &Expr {
     match expr {
         Expr::Grouping { expression } => unwrap_grouping(expression),
@@ -1440,8 +1483,7 @@ impl StmtVisitor<CResult> for Compiler {
     }
 }
 
-// ---- optimizaciones: jump simplification ---------------------------
-
+/// Simplifica las instrucciones de salto en un chunk aplicando compactación física y jump threading.
 pub fn simplify_chunk_jumps(chunk: &mut Chunk) {
     // 1. Compactar primero eliminando físicamente Jump(0).
     // Si la compactación detecta offsets inválidos o desbordamientos, aborta de forma segura
@@ -1459,6 +1501,7 @@ pub fn simplify_chunk_jumps(chunk: &mut Chunk) {
     compact_chunk_jumps(chunk);
 }
 
+/// Sigue cadenas de saltos incondicionales hacia adelante actualizando los desplazamientos de destino.
 fn jump_threading(chunk: &mut Chunk) {
     let len = chunk.code.len();
     for i in 0..len {
@@ -1493,6 +1536,7 @@ fn jump_threading(chunk: &mut Chunk) {
     }
 }
 
+/// Resuelve la cadena de saltos hacia adelante detectando ciclos y límites de chunk.
 fn resolve_jump_chain(chunk: &Chunk, origin: usize, mut curr_target: usize) -> Option<usize> {
     let len = chunk.code.len();
     if curr_target > len {
@@ -1532,6 +1576,7 @@ fn resolve_jump_chain(chunk: &Chunk, origin: usize, mut curr_target: usize) -> O
     if changed { Some(curr_target) } else { None }
 }
 
+/// Elimina físicamente instrucciones `Jump(0)` remapeando coherentemente todos los saltos y bucles.
 fn compact_chunk_jumps(chunk: &mut Chunk) -> bool {
     let old_len = chunk.code.len();
     if old_len == 0 {

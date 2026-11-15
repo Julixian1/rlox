@@ -1,3 +1,5 @@
+//! Representación universal de valores en tiempo de ejecución para los tres backends de Lox.
+
 use crate::class::{LoxClass, LoxInstance};
 use crate::closure::{Closure, FnProto};
 use crate::compiler::reg::closure::{RegClosure, RegProto};
@@ -8,12 +10,17 @@ use std::cell::RefCell;
 use std::fmt;
 use std::rc::Rc;
 
+/// Puntero a función nativa invocable desde Lox con argumentos de tipo `Value`.
 pub type NativeFnPtr = fn(&[Value]) -> Result<Value, String>;
 
+/// Descriptor de una función nativa del sistema o funciones integradas (built-ins).
 #[derive(Clone)]
 pub struct NativeFn {
+    /// Nombre identificador de la función nativa.
     pub name: String,
+    /// Aridad esperada por la función nativa.
     pub arity: usize,
+    /// Puntero a la función en Rust.
     pub func: NativeFnPtr,
 }
 
@@ -31,6 +38,7 @@ impl PartialEq for NativeFn {
     }
 }
 
+/// Valida y convierte un `Value` numérico a un índice entero válido dentro de los límites de una lista.
 pub fn validate_list_index(list_len: usize, index_val: &Value) -> Result<usize, String> {
     match index_val {
         Value::Number(n) => {
@@ -50,6 +58,7 @@ pub fn validate_list_index(list_len: usize, index_val: &Value) -> Result<usize, 
     }
 }
 
+/// Función nativa `len`: retorna la cantidad de elementos de una lista dada.
 pub fn native_len(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err(format!("Expected 1 argument but got {}.", args.len()));
@@ -60,6 +69,7 @@ pub fn native_len(args: &[Value]) -> Result<Value, String> {
     }
 }
 
+/// Función nativa `push`: agrega un elemento al final de una lista mutable.
 pub fn native_push(args: &[Value]) -> Result<Value, String> {
     if args.len() != 2 {
         return Err(format!("Expected 2 arguments but got {}.", args.len()));
@@ -73,6 +83,7 @@ pub fn native_push(args: &[Value]) -> Result<Value, String> {
     }
 }
 
+/// Función nativa `pop`: extrae y retorna el último elemento de una lista mutable.
 pub fn native_pop(args: &[Value]) -> Result<Value, String> {
     if args.len() != 1 {
         return Err(format!("Expected 1 argument but got {}.", args.len()));
@@ -89,23 +100,40 @@ pub fn native_pop(args: &[Value]) -> Result<Value, String> {
     }
 }
 
+/// Representación de cualquier valor computable en Lox (primitivos, referencias y objetos invocables).
 #[derive(Debug, Clone)]
 pub enum Value {
+    /// Valor numérico de coma flotante de doble precisión (f64).
     Number(f64),
+    /// Cadena de texto dinámica.
     String(String),
+    /// Valor booleano (`true` o `false`).
     Boolean(bool),
+    /// Ausencia de valor o nulo (`nil`).
     Nil,
+    /// Función definida por el usuario para el backend Tree-Walk.
     Function(Rc<LoxFunction>),
+    /// Definición de clase para el backend Tree-Walk.
     Class(Rc<RefCell<LoxClass>>),
+    /// Instancia de clase para el backend Tree-Walk.
     Instance(Rc<RefCell<LoxInstance>>),
+    /// Prototipo de función para Stack VM.
     Proto(Rc<FnProto>),
+    /// Clausura en tiempo de ejecución para Stack VM.
     Closure(Rc<Closure>),
+    /// Definición de clase optimizada para Stack y Register VM.
     VmClass(Rc<RefCell<VmClass>>),
+    /// Instancia de clase optimizada para Stack y Register VM.
     VmInstance(Rc<RefCell<VmInstance>>),
+    /// Método enlazado a una instancia para Stack y Register VM.
     BoundMethod(Rc<BoundMethod>),
+    /// Prototipo de función para Register VM.
     RegProto(Rc<RegProto>),
+    /// Clausura en tiempo de ejecución para Register VM.
     RegClosure(Rc<RegClosure>),
+    /// Lista nativa indexable y mutable.
     List(Rc<RefCell<Vec<Value>>>),
+    /// Función nativa del sistema.
     NativeFn(Rc<NativeFn>),
 }
 
@@ -147,6 +175,7 @@ impl Value {
 }
 
 impl Value {
+    /// Formatea recursivamente el valor rastreando referencias cíclicas a listas para evitar desbordes de pila.
     fn fmt_with_visited(
         &self,
         f: &mut fmt::Formatter<'_>,

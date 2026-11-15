@@ -18,10 +18,6 @@ use std::fs;
 use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 
-// ---------------------------------------------------------------------------
-// Infraestructura de captura de salida estándar y ejecución
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Default)]
 struct SharedOutput(Arc<Mutex<Vec<u8>>>);
 
@@ -174,7 +170,6 @@ fn assert_consolidated_example_ok(file_path: &str, expected_stdout: &str, featur
     let source = fs::read_to_string(file_path)
         .unwrap_or_else(|_| panic!("No se pudo leer el archivo {}", file_path));
 
-    // 1. Tree-Walk
     let tw = run_treewalk(&source);
     assert!(
         tw.error.is_none(),
@@ -188,7 +183,6 @@ fn assert_consolidated_example_ok(file_path: &str, expected_stdout: &str, featur
         file_path
     );
 
-    // 2. Stack VM -O0
     let vm_o0 = run_stack_vm(&source, OptLevel::O0);
     assert!(
         vm_o0.error.is_none(),
@@ -202,7 +196,6 @@ fn assert_consolidated_example_ok(file_path: &str, expected_stdout: &str, featur
         file_path
     );
 
-    // 3. Stack VM -O2
     let vm_o2 = run_stack_vm(&source, OptLevel::O2);
     assert!(
         vm_o2.error.is_none(),
@@ -216,7 +209,6 @@ fn assert_consolidated_example_ok(file_path: &str, expected_stdout: &str, featur
         file_path
     );
 
-    // Paridad estricta entre backends compatibles
     assert_eq!(
         tw.stdout, vm_o0.stdout,
         "[{}] Diferencia entre TreeWalk y VM -O0",
@@ -228,7 +220,6 @@ fn assert_consolidated_example_ok(file_path: &str, expected_stdout: &str, featur
         file_path
     );
 
-    // Verificación granular de secciones funcionales
     for marker in feature_markers {
         assert!(
             tw.stdout.contains(marker),
@@ -238,7 +229,6 @@ fn assert_consolidated_example_ok(file_path: &str, expected_stdout: &str, featur
         );
     }
 
-    // 4. Register VM: Debe fallar en compilacion indicando falta de soporte de clases
     let reg = run_register_vm(&source);
     assert!(
         reg.error.is_some(),
@@ -255,10 +245,6 @@ fn assert_consolidated_example_ok(file_path: &str, expected_stdout: &str, featur
         reg_err
     );
 }
-
-// ===========================================================================
-// 1. Tests automatizados de los ejemplos consolidados
-// ===========================================================================
 
 #[test]
 fn test_example_basic() {
@@ -427,10 +413,6 @@ Parametros recibidos en metodo:
     assert_consolidated_example_ok("examples/classes/advanced.lox", expected, &markers);
 }
 
-// ===========================================================================
-// 2. Tests de errores (casos negativos embebidos directamente como strings)
-// ===========================================================================
-
 #[test]
 fn test_error_property_on_non_instance() {
     let source = "
@@ -442,7 +424,6 @@ print not_an_instance.campo;
     let vm_o0 = run_stack_vm(source, OptLevel::O0);
     let vm_o2 = run_stack_vm(source, OptLevel::O2);
 
-    // Error en tiempo de ejecucion en linea 3
     assert!(tw.error.is_some());
     assert!(vm_o0.error.is_some());
     assert!(vm_o2.error.is_some());
@@ -452,7 +433,6 @@ print not_an_instance.campo;
     assert!(vm_o0.error.unwrap().contains(expected_msg));
     assert!(vm_o2.error.unwrap().contains(expected_msg));
 
-    // Register VM falla en compilacion
     let reg = run_register_vm(source);
     assert!(reg.error.is_some());
     assert!(reg.error.unwrap().contains("Properties are not supported yet in the register backend."));
@@ -470,7 +450,6 @@ obj.metodo_inexistente();
     let vm_o0 = run_stack_vm(source, OptLevel::O0);
     let vm_o2 = run_stack_vm(source, OptLevel::O2);
 
-    // Error en tiempo de ejecucion en linea 4
     assert!(tw.error.is_some());
     assert!(vm_o0.error.is_some());
     assert!(vm_o2.error.is_some());
@@ -487,13 +466,11 @@ fn test_error_this_outside_class() {
 print this;
 ";
 
-    // Error semantico estatico detectado por checker en linea 2
     let stmts = parse_and_check(source);
     assert!(stmts.is_err());
     let err = stmts.unwrap_err();
     assert!(err.contains("[line 2] Error at 'this': Can't use 'this' outside of a class."));
 
-    // Rechazado antes de runtime en los backends
     assert!(run_treewalk(source).error.is_some());
     assert!(run_stack_vm(source, OptLevel::O0).error.is_some());
     assert!(run_stack_vm(source, OptLevel::O2).error.is_some());
@@ -508,7 +485,6 @@ fn test_error_super_outside_class() {
 super.metodo();
 ";
 
-    // Error semantico estatico detectado por checker en linea 2
     let stmts = parse_and_check(source);
     assert!(stmts.is_err());
     let err = stmts.unwrap_err();
@@ -529,7 +505,6 @@ class Standalone {
 }
 ";
 
-    // Error semantico estatico detectado por checker en linea 4
     let stmts = parse_and_check(source);
     assert!(stmts.is_err());
     let err = stmts.unwrap_err();
@@ -546,7 +521,6 @@ fn test_error_self_inheritance() {
 class Loop < Loop {}
 ";
 
-    // Error sintactico en Parser en linea 2
     let mut scanner = Scanner::new(source.to_string());
     let tokens = scanner.scan_tokens().unwrap();
     let mut parser = Parser::new(tokens);
@@ -567,7 +541,6 @@ var NotAClass = \"no_es_clase\";
 class Child < NotAClass {}
 ";
 
-    // Error de runtime en linea 3
     let tw = run_treewalk(source);
     let vm_o0 = run_stack_vm(source, OptLevel::O0);
     let vm_o2 = run_stack_vm(source, OptLevel::O2);
@@ -592,7 +565,6 @@ class Account {
 }
 ";
 
-    // Error semantico estatico detectado por checker en linea 4
     let stmts = parse_and_check(source);
     assert!(stmts.is_err());
     let err = stmts.unwrap_err();
@@ -602,10 +574,6 @@ class Account {
     assert!(run_stack_vm(source, OptLevel::O0).error.is_some());
     assert!(run_stack_vm(source, OptLevel::O2).error.is_some());
 }
-
-// ===========================================================================
-// 3. Tests de validación de optimizaciones (-O0 vs -O2)
-// ===========================================================================
 
 #[test]
 fn test_opt_prepare_invoke_direct_method_call() {
