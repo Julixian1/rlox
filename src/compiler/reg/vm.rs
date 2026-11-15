@@ -61,11 +61,14 @@ impl<W: Write> RegVm<W> {
                 func: crate::value::native_pop,
             })),
         );
-        globals.insert("pop".to_string(), Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
-            name: "pop".to_string(),
-            arity: 1,
-            func: crate::value::native_pop,
-        })));
+        globals.insert(
+            "pop".to_string(),
+            Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
+                name: "pop".to_string(),
+                arity: 1,
+                func: crate::value::native_pop,
+            })),
+        );
         RegVm {
             registers: Vec::new(),
             frames: Vec::new(),

@@ -48,22 +48,16 @@ pub trait StmtVisitor<R> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
     /// Sentencia de expresión evaluable (`expr;`).
-    Expression {
-        expression: Expr,
-    },
+    Expression { expression: Expr },
     /// Sentencia de impresión en salida estándar (`print expr;`).
-    Print {
-        expression: Expr,
-    },
+    Print { expression: Expr },
     /// Declaración de variable (`var name = initializer;`).
     Var {
         name: Token,
         initializer: Option<Expr>,
     },
     /// Bloque de sentencias delimitado por llaves `{ ... }`.
-    Block {
-        statements: Vec<Stmt>,
-    },
+    Block { statements: Vec<Stmt> },
     /// Sentencia condicional bifurcada `if (cond) then_branch else else_branch`.
     If {
         condition: Expr,
@@ -71,10 +65,7 @@ pub enum Stmt {
         else_branch: Option<Box<Stmt>>,
     },
     /// Bucle condicional `while (cond) body`.
-    While {
-        condition: Expr,
-        body: Box<Stmt>,
-    },
+    While { condition: Expr, body: Box<Stmt> },
     /// Declaración de función o método (`fun name(params) { body }`).
     Function {
         name: Token,
@@ -82,18 +73,11 @@ pub enum Stmt {
         body: Rc<Vec<Stmt>>,
     },
     /// Sentencia de retorno explícito de función (`return expr;`).
-    Return {
-        keyword: Token,
-        value: Option<Expr>,
-    },
+    Return { keyword: Token, value: Option<Expr> },
     /// Sentencia de terminación inmediata de bucle (`break;`).
-    Break {
-        keyword: Token,
-    },
+    Break { keyword: Token },
     /// Sentencia de continuación a la siguiente iteración de bucle (`continue;`).
-    Continue {
-        keyword: Token,
-    },
+    Continue { keyword: Token },
     /// Bucle determinado con cláusulas `for (init; cond; inc) body`.
     For {
         initializer: Option<Box<Stmt>>,

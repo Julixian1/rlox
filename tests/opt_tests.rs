@@ -197,7 +197,12 @@ fn test_e4a_constant_folding_bytecode_and_flags() {
     assert!(!code_o1.contains(&OpCode::Multiply));
     assert_eq!(
         code_o1,
-        vec![OpCode::Constant(0), OpCode::Print, OpCode::Nil, OpCode::Return]
+        vec![
+            OpCode::Constant(0),
+            OpCode::Print,
+            OpCode::Nil,
+            OpCode::Return
+        ]
     );
 
     let o2 = OptConfig::from_level(OptLevel::O2);
@@ -280,7 +285,12 @@ fn test_e4a_no_folding_on_variables_and_side_effects() {
 
     assert!(proto.chunk.code.contains(&OpCode::Add));
     assert!(proto.chunk.code.contains(&OpCode::Multiply));
-    assert!(proto.chunk.constants.contains(&rlox::value::Value::Number(30.0)));
+    assert!(
+        proto
+            .chunk
+            .constants
+            .contains(&rlox::value::Value::Number(30.0))
+    );
 }
 
 #[test]
@@ -301,10 +311,14 @@ fn test_e4a_type_errors_preserved_at_runtime() {
         assert!(p_o1.is_ok());
 
         let mut out0 = Vec::new();
-        let err0 = Vm::with_output(&mut out0).interpret(p_o0.unwrap()).unwrap_err();
+        let err0 = Vm::with_output(&mut out0)
+            .interpret(p_o0.unwrap())
+            .unwrap_err();
 
         let mut out1 = Vec::new();
-        let err1 = Vm::with_output(&mut out1).interpret(p_o1.unwrap()).unwrap_err();
+        let err1 = Vm::with_output(&mut out1)
+            .interpret(p_o1.unwrap())
+            .unwrap_err();
 
         assert_eq!(err0, err1, "Error en runtime divergente para: {}", src);
     }
@@ -324,10 +338,7 @@ fn test_e4a_ieee754_special_values_preserved() {
     let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
     let (out_o1, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O1));
     assert_eq!(out_o0, out_o1);
-    assert_eq!(
-        out_o1,
-        "NaN\ninf\n-inf\n-0\nfalse\nfalse\nfalse\n"
-    );
+    assert_eq!(out_o1, "NaN\ninf\n-inf\n-0\nfalse\nfalse\nfalse\n");
 }
 
 #[test]
@@ -412,10 +423,7 @@ fn test_e4a_multiline_runtime_error_lines_preserved() {
 #[test]
 fn test_e4a_compiler_validations_not_bypassed() {
     let compile_error_cases = [
-        (
-            "var x = 10 + this;",
-            "Can't use 'this' outside of a class.",
-        ),
+        ("var x = 10 + this;", "Can't use 'this' outside of a class."),
         (
             "var x = super.foo() + 20;",
             "Can't use 'super' outside of a class.",
@@ -463,14 +471,22 @@ fn test_e4b_dce_conditionals_bytecode_and_flags() {
     let o0 = OptConfig::from_level(OptLevel::O0);
     let (out_o0, code_o0) = run_with_opt(src, o0);
     assert_eq!(out_o0, "Siempre\n");
-    assert!(code_o0.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+    assert!(
+        code_o0
+            .iter()
+            .any(|op| matches!(op, OpCode::JumpIfFalse(_)))
+    );
     assert!(code_o0.iter().any(|op| matches!(op, OpCode::Jump(_))));
 
     let mut o0_dce = OptConfig::from_level(OptLevel::O0);
     o0_dce.apply_flags("dce", true).unwrap();
     let (out_dce, code_dce) = run_with_opt(src, o0_dce);
     assert_eq!(out_dce, "Siempre\n");
-    assert!(!code_dce.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+    assert!(
+        !code_dce
+            .iter()
+            .any(|op| matches!(op, OpCode::JumpIfFalse(_)))
+    );
     assert!(!code_dce.iter().any(|op| matches!(op, OpCode::Jump(_))));
     assert_eq!(
         code_dce,
@@ -491,7 +507,11 @@ fn test_e4b_dce_conditionals_bytecode_and_flags() {
     o1_no_dce.apply_flags("dce", false).unwrap();
     let (out_no_dce, code_no_dce) = run_with_opt(src, o1_no_dce);
     assert_eq!(out_no_dce, "Siempre\n");
-    assert!(code_no_dce.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+    assert!(
+        code_no_dce
+            .iter()
+            .any(|op| matches!(op, OpCode::JumpIfFalse(_)))
+    );
 }
 
 #[test]
@@ -501,12 +521,20 @@ fn test_e4b_dce_if_true_without_else() {
     let o0 = OptConfig::from_level(OptLevel::O0);
     let (out_o0, code_o0) = run_with_opt(src, o0);
     assert_eq!(out_o0, "Si\n");
-    assert!(code_o0.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+    assert!(
+        code_o0
+            .iter()
+            .any(|op| matches!(op, OpCode::JumpIfFalse(_)))
+    );
 
     let o1 = OptConfig::from_level(OptLevel::O1);
     let (out_o1, code_o1) = run_with_opt(src, o1);
     assert_eq!(out_o1, "Si\n");
-    assert!(!code_o1.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+    assert!(
+        !code_o1
+            .iter()
+            .any(|op| matches!(op, OpCode::JumpIfFalse(_)))
+    );
     assert_eq!(
         code_o1,
         vec![
@@ -572,7 +600,12 @@ fn test_e4b_dce_unconditional_return() {
     let proto_o1 = compiler::compile_with_opt(&stmts, o1).unwrap();
 
     fn count_prints(proto: &rlox::closure::FnProto) -> usize {
-        let mut count = proto.chunk.code.iter().filter(|op| matches!(op, OpCode::Print)).count();
+        let mut count = proto
+            .chunk
+            .code
+            .iter()
+            .filter(|op| matches!(op, OpCode::Print))
+            .count();
         for c in &proto.chunk.constants {
             if let rlox::value::Value::Proto(p) = c {
                 count += count_prints(p);
@@ -587,11 +620,26 @@ fn test_e4b_dce_unconditional_return() {
 #[test]
 fn test_e4b_dce_preserves_compiler_validations_in_dead_branches() {
     let invalid_programs = [
-        ("if (false) { print this; }", "Can't use 'this' outside of a class."),
-        ("if (true) { print 1; } else { print this; }", "Can't use 'this' outside of a class."),
-        ("while (false) { print super.foo(); }", "Can't use 'super' outside of a class."),
-        ("if (false) { return 42; }", "Can't return from top-level code."),
-        ("while (false) { return 42; }", "Can't return from top-level code."),
+        (
+            "if (false) { print this; }",
+            "Can't use 'this' outside of a class.",
+        ),
+        (
+            "if (true) { print 1; } else { print this; }",
+            "Can't use 'this' outside of a class.",
+        ),
+        (
+            "while (false) { print super.foo(); }",
+            "Can't use 'super' outside of a class.",
+        ),
+        (
+            "if (false) { return 42; }",
+            "Can't return from top-level code.",
+        ),
+        (
+            "while (false) { return 42; }",
+            "Can't return from top-level code.",
+        ),
         (
             "class A { foo() { return 1; print super.bar(); } }",
             "Can't use 'super' in a class with no superclass.",
@@ -638,7 +686,11 @@ fn test_e4b_dce_nested_and_combined_with_folding() {
 
     assert_eq!(out_o0, "B\n");
     assert_eq!(out_o1, "B\n");
-    assert!(!code_o1.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_) | OpCode::Jump(_))));
+    assert!(
+        !code_o1
+            .iter()
+            .any(|op| matches!(op, OpCode::JumpIfFalse(_) | OpCode::Jump(_)))
+    );
     assert_eq!(
         code_o1,
         vec![
@@ -711,7 +763,11 @@ fn test_e4b_dce_duplicate_declarations_in_dead_code_rejected() {
         let stmts = parser.parse().unwrap();
 
         let errors = checker::check(&stmts);
-        assert!(!errors.is_empty(), "El checker debió detectar error en: {}", src);
+        assert!(
+            !errors.is_empty(),
+            "El checker debió detectar error en: {}",
+            src
+        );
         assert!(errors[0].contains(expected_err));
     }
 }
@@ -827,7 +883,12 @@ fn test_e4b_dce_closures_and_upvalues_soundness() {
         let p1 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O1)).unwrap();
 
         fn has_jumps(proto: &rlox::closure::FnProto) -> bool {
-            if proto.chunk.code.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_) | OpCode::Loop(_))) {
+            if proto
+                .chunk
+                .code
+                .iter()
+                .any(|op| matches!(op, OpCode::JumpIfFalse(_) | OpCode::Loop(_)))
+            {
                 return true;
             }
             for c in &proto.chunk.constants {
@@ -840,8 +901,16 @@ fn test_e4b_dce_closures_and_upvalues_soundness() {
             false
         }
 
-        assert!(has_jumps(&p0), "En O0 deben existir saltos de control para: {}", src);
-        assert!(!has_jumps(&p1), "En O1 no deben quedar saltos de control para: {}", src);
+        assert!(
+            has_jumps(&p0),
+            "En O0 deben existir saltos de control para: {}",
+            src
+        );
+        assert!(
+            !has_jumps(&p1),
+            "En O1 no deben quedar saltos de control para: {}",
+            src
+        );
     }
 }
 
@@ -1122,7 +1191,10 @@ fn test_e4c_16_loop_targeting_eliminated_jump_zero() {
 
     compiler::simplify_chunk_jumps(&mut chunk);
 
-    assert_eq!(chunk.code, vec![OpCode::Nil, OpCode::Print, OpCode::Loop(2)]);
+    assert_eq!(
+        chunk.code,
+        vec![OpCode::Nil, OpCode::Print, OpCode::Loop(2)]
+    );
     assert_eq!(chunk.lines, vec![1, 3, 4]);
 }
 
@@ -1193,13 +1265,28 @@ fn test_audit_e4_1_cli_flag_combinations() {
 #[test]
 fn test_audit_e4_2_folding_plus_dce_composition() {
     let test_cases = [
-        ("if (10 > 5) print \"correcto\"; else print \"incorrecto\";", "correcto\n"),
+        (
+            "if (10 > 5) print \"correcto\"; else print \"incorrecto\";",
+            "correcto\n",
+        ),
         ("if (nil) print \"fallo\"; else print \"ok\";", "ok\n"),
         ("if (false) print \"fallo\"; else print \"ok\";", "ok\n"),
-        ("if (0) print \"cero es truthy\"; else print \"fallo\";", "cero es truthy\n"),
-        ("if (\"\") print \"vacio es truthy\"; else print \"fallo\";", "vacio es truthy\n"),
-        ("if ((2 + 3) * 4 == 20) print \"aritmetica plegada\"; else print \"fallo\";", "aritmetica plegada\n"),
-        ("if (-5 < 2) print \"negacion plegada\"; else print \"fallo\";", "negacion plegada\n"),
+        (
+            "if (0) print \"cero es truthy\"; else print \"fallo\";",
+            "cero es truthy\n",
+        ),
+        (
+            "if (\"\") print \"vacio es truthy\"; else print \"fallo\";",
+            "vacio es truthy\n",
+        ),
+        (
+            "if ((2 + 3) * 4 == 20) print \"aritmetica plegada\"; else print \"fallo\";",
+            "aritmetica plegada\n",
+        ),
+        (
+            "if (-5 < 2) print \"negacion plegada\"; else print \"fallo\";",
+            "negacion plegada\n",
+        ),
     ];
 
     for (src, expected) in test_cases {
@@ -1214,8 +1301,16 @@ fn test_audit_e4_2_folding_plus_dce_composition() {
         assert_eq!(out_o1, expected, "O1 salida para: {}", src);
         assert_eq!(out_flags, expected, "Flags salida para: {}", src);
 
-        assert!(code_o0.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
-        assert!(!code_o1.iter().any(|op| matches!(op, OpCode::JumpIfFalse(_))));
+        assert!(
+            code_o0
+                .iter()
+                .any(|op| matches!(op, OpCode::JumpIfFalse(_)))
+        );
+        assert!(
+            !code_o1
+                .iter()
+                .any(|op| matches!(op, OpCode::JumpIfFalse(_)))
+        );
         assert_eq!(code_o1, code_flags);
     }
 }
@@ -1359,18 +1454,34 @@ fn test_audit_e4_6_bytecode_invariants_recursive_verifier() {
         let lines = &proto.chunk.lines;
         let len = code.len();
 
-        assert_eq!(code.len(), lines.len(), "code y lines deben coincidir en tamaño");
+        assert_eq!(
+            code.len(),
+            lines.len(),
+            "code y lines deben coincidir en tamaño"
+        );
 
         for (i, op) in code.iter().enumerate() {
             match op {
                 OpCode::Jump(offset) => {
                     let target = i + 1 + *offset as usize;
-                    assert!(target <= len, "Jump({}) en índice {} excede longitud {}", offset, i, len);
+                    assert!(
+                        target <= len,
+                        "Jump({}) en índice {} excede longitud {}",
+                        offset,
+                        i,
+                        len
+                    );
                     assert!(target > i, "Jump no puede saltar hacia atrás");
                 }
                 OpCode::JumpIfFalse(offset) => {
                     let target = i + 1 + *offset as usize;
-                    assert!(target <= len, "JumpIfFalse({}) en índice {} excede longitud {}", offset, i, len);
+                    assert!(
+                        target <= len,
+                        "JumpIfFalse({}) en índice {} excede longitud {}",
+                        offset,
+                        i,
+                        len
+                    );
                     assert!(target > i, "JumpIfFalse no puede saltar hacia atrás");
                 }
                 OpCode::Loop(offset) => {
@@ -1384,10 +1495,18 @@ fn test_audit_e4_6_bytecode_invariants_recursive_verifier() {
                     assert!(target <= i + 1, "Loop no puede saltar hacia adelante");
                 }
                 OpCode::Constant(k) => {
-                    assert!((*k as usize) < proto.chunk.constants.len(), "Constante {} fuera de rango", k);
+                    assert!(
+                        (*k as usize) < proto.chunk.constants.len(),
+                        "Constante {} fuera de rango",
+                        k
+                    );
                 }
                 OpCode::Closure(k) => {
-                    assert!((*k as usize) < proto.chunk.constants.len(), "Proto de closure {} fuera de rango", k);
+                    assert!(
+                        (*k as usize) < proto.chunk.constants.len(),
+                        "Proto de closure {} fuera de rango",
+                        k
+                    );
                 }
                 _ => {}
             }
@@ -1438,9 +1557,9 @@ fn test_audit_e4_7_cycle_detection_conservative_preservation() {
     // Cuando el salto en 2 apunta a 0, next_target (0) <= origin (0) o visited.contains(0).
     // Debe retornar None y dejar el Jump original en 0.
     chunk.write(OpCode::Jump(1), 1); // 0 -> 2
-    chunk.write(OpCode::Print, 2);   // 1
+    chunk.write(OpCode::Print, 2); // 1
     chunk.write(OpCode::Jump(0), 3); // 2 -> Jump(0) apunta a 3
-    chunk.write(OpCode::Return, 4);  // 3
+    chunk.write(OpCode::Return, 4); // 3
 
     compiler::simplify_chunk_jumps(&mut chunk);
 
@@ -1495,27 +1614,54 @@ fn test_e5a1_bytecode_emission_and_flags() {
 
     let opt_o0 = OptConfig::from_level(OptLevel::O0);
     let proto_o0 = compiler::compile_with_opt(&stmts, opt_o0).unwrap();
-    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::GetProperty(_))));
+    assert!(find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::GetProperty(_)
+    )));
     assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::Call(_))));
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::PrepareInvoke(_))));
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::Invoke(_))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::PrepareInvoke(_)
+    )));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::Invoke(_)
+    )));
 
     let mut opt_o0_invoke = OptConfig::from_level(OptLevel::O0);
     opt_o0_invoke.apply_flags("invoke", true).unwrap();
     let proto_o0_invoke = compiler::compile_with_opt(&stmts, opt_o0_invoke).unwrap();
-    assert!(find_opcode(&proto_o0_invoke, &|op| matches!(op, OpCode::PrepareInvoke(_))));
-    assert!(find_opcode(&proto_o0_invoke, &|op| matches!(op, OpCode::Invoke(_))));
+    assert!(find_opcode(&proto_o0_invoke, &|op| matches!(
+        op,
+        OpCode::PrepareInvoke(_)
+    )));
+    assert!(find_opcode(&proto_o0_invoke, &|op| matches!(
+        op,
+        OpCode::Invoke(_)
+    )));
 
     let opt_o2 = OptConfig::from_level(OptLevel::O2);
     let proto_o2 = compiler::compile_with_opt(&stmts, opt_o2).unwrap();
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::PrepareInvoke(_))));
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::Invoke(_))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::PrepareInvoke(_)
+    )));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::Invoke(_)
+    )));
 
     let mut opt_o2_no_invoke = OptConfig::from_level(OptLevel::O2);
     opt_o2_no_invoke.apply_flags("invoke", false).unwrap();
     let proto_o2_no_invoke = compiler::compile_with_opt(&stmts, opt_o2_no_invoke).unwrap();
-    assert!(!find_opcode(&proto_o2_no_invoke, &|op| matches!(op, OpCode::PrepareInvoke(_))));
-    assert!(!find_opcode(&proto_o2_no_invoke, &|op| matches!(op, OpCode::Invoke(_))));
+    assert!(!find_opcode(&proto_o2_no_invoke, &|op| matches!(
+        op,
+        OpCode::PrepareInvoke(_)
+    )));
+    assert!(!find_opcode(&proto_o2_no_invoke, &|op| matches!(
+        op,
+        OpCode::Invoke(_)
+    )));
 }
 
 #[test]
@@ -1609,7 +1755,8 @@ fn test_e5a1_error_precedence_and_evaluation_order() {
     let mut opt_inv = OptConfig::from_level(OptLevel::O0);
     opt_inv.apply_flags("invoke", true).unwrap();
 
-    let proto1_o0 = compiler::compile_with_opt(&stmts1, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto1_o0 =
+        compiler::compile_with_opt(&stmts1, OptConfig::from_level(OptLevel::O0)).unwrap();
     let proto1_inv = compiler::compile_with_opt(&stmts1, opt_inv.clone()).unwrap();
 
     let mut vm_o0 = Vm::with_output(Vec::new());
@@ -1628,7 +1775,8 @@ fn test_e5a1_error_precedence_and_evaluation_order() {
         f.inexistente(1 / 0);
     "#;
     let stmts2 = parse_and_check(src2);
-    let proto2_o0 = compiler::compile_with_opt(&stmts2, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto2_o0 =
+        compiler::compile_with_opt(&stmts2, OptConfig::from_level(OptLevel::O0)).unwrap();
     let proto2_inv = compiler::compile_with_opt(&stmts2, opt_inv).unwrap();
 
     let mut vm2_o0 = Vm::with_output(Vec::new());
@@ -1750,7 +1898,11 @@ fn test_e5a1_inherited_method_resolution_three_levels() {
     assert_eq!(out_inv, "A_foo\n");
     assert_eq!(out_o2, "A_foo\n");
 
-    assert!(code_inv.iter().any(|op| matches!(op, OpCode::PrepareInvoke(_))));
+    assert!(
+        code_inv
+            .iter()
+            .any(|op| matches!(op, OpCode::PrepareInvoke(_)))
+    );
     assert!(code_inv.iter().any(|op| matches!(op, OpCode::Invoke(_))));
 }
 
@@ -1835,7 +1987,8 @@ fn test_e5a1_field_shadowing_various_callables() {
         h.m();
     "#;
     let stmts_err = parse_and_check(src_err);
-    let proto_err_o0 = compiler::compile_with_opt(&stmts_err, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_err_o0 =
+        compiler::compile_with_opt(&stmts_err, OptConfig::from_level(OptLevel::O0)).unwrap();
     let proto_err_inv = compiler::compile_with_opt(&stmts_err, opt_inv.clone()).unwrap();
 
     let mut vm_err_o0 = Vm::with_output(Vec::new());
@@ -1855,7 +2008,8 @@ fn test_e5a1_field_shadowing_various_callables() {
         h.m(1);
     "#;
     let stmts_arity = parse_and_check(src_arity);
-    let proto_ar_o0 = compiler::compile_with_opt(&stmts_arity, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_ar_o0 =
+        compiler::compile_with_opt(&stmts_arity, OptConfig::from_level(OptLevel::O0)).unwrap();
     let proto_ar_inv = compiler::compile_with_opt(&stmts_arity, opt_inv).unwrap();
 
     let mut vm_ar_o0 = Vm::with_output(Vec::new());
@@ -1887,23 +2041,44 @@ fn test_e5a2_bytecode_emission_and_flags() {
     let stmts = parse_and_check(src);
 
     let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
-    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::GetSuper(_))));
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::PrepareSuperInvoke(_))));
+    assert!(find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::GetSuper(_)
+    )));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::PrepareSuperInvoke(_)
+    )));
 
     let mut opt_inv = OptConfig::from_level(OptLevel::O0);
     opt_inv.apply_flags("invoke", true).unwrap();
     let proto_inv = compiler::compile_with_opt(&stmts, opt_inv).unwrap();
-    assert!(find_opcode(&proto_inv, &|op| matches!(op, OpCode::PrepareSuperInvoke(_))));
-    assert!(find_opcode(&proto_inv, &|op| matches!(op, OpCode::Invoke(_))));
-    assert!(find_opcode(&proto_inv, &|op| matches!(op, OpCode::GetSuper(_))));
+    assert!(find_opcode(&proto_inv, &|op| matches!(
+        op,
+        OpCode::PrepareSuperInvoke(_)
+    )));
+    assert!(find_opcode(&proto_inv, &|op| matches!(
+        op,
+        OpCode::Invoke(_)
+    )));
+    assert!(find_opcode(&proto_inv, &|op| matches!(
+        op,
+        OpCode::GetSuper(_)
+    )));
 
     let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::PrepareSuperInvoke(_))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::PrepareSuperInvoke(_)
+    )));
 
     let mut opt_o2_no_inv = OptConfig::from_level(OptLevel::O2);
     opt_o2_no_inv.apply_flags("invoke", false).unwrap();
     let proto_o2_no_inv = compiler::compile_with_opt(&stmts, opt_o2_no_inv).unwrap();
-    assert!(!find_opcode(&proto_o2_no_inv, &|op| matches!(op, OpCode::PrepareSuperInvoke(_))));
+    assert!(!find_opcode(&proto_o2_no_inv, &|op| matches!(
+        op,
+        OpCode::PrepareSuperInvoke(_)
+    )));
 }
 
 #[test]
@@ -2166,28 +2341,64 @@ fn test_e5b_bytecode_emission_and_flags() {
     let stmts = parse_and_check(src);
 
     let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
-    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::GetGlobal(_))));
-    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::SetGlobal(_))));
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::GetGlobalFast(_))));
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::SetGlobalFast(_))));
+    assert!(find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::GetGlobal(_)
+    )));
+    assert!(find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::SetGlobal(_)
+    )));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::GetGlobalFast(_)
+    )));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::SetGlobalFast(_)
+    )));
 
     let mut opt_globals = OptConfig::from_level(OptLevel::O0);
     opt_globals.apply_flags("globals", true).unwrap();
     let proto_globals = compiler::compile_with_opt(&stmts, opt_globals).unwrap();
-    assert!(find_opcode(&proto_globals, &|op| matches!(op, OpCode::GetGlobalFast(_))));
-    assert!(find_opcode(&proto_globals, &|op| matches!(op, OpCode::SetGlobalFast(_))));
+    assert!(find_opcode(&proto_globals, &|op| matches!(
+        op,
+        OpCode::GetGlobalFast(_)
+    )));
+    assert!(find_opcode(&proto_globals, &|op| matches!(
+        op,
+        OpCode::SetGlobalFast(_)
+    )));
 
     let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::GetGlobalFast(_))));
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::SetGlobalFast(_))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::GetGlobalFast(_)
+    )));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::SetGlobalFast(_)
+    )));
 
     let mut opt_o2_no_globals = OptConfig::from_level(OptLevel::O2);
     opt_o2_no_globals.apply_flags("globals", false).unwrap();
     let proto_o2_no_globals = compiler::compile_with_opt(&stmts, opt_o2_no_globals).unwrap();
-    assert!(find_opcode(&proto_o2_no_globals, &|op| matches!(op, OpCode::GetGlobal(_))));
-    assert!(find_opcode(&proto_o2_no_globals, &|op| matches!(op, OpCode::SetGlobal(_))));
-    assert!(!find_opcode(&proto_o2_no_globals, &|op| matches!(op, OpCode::GetGlobalFast(_))));
-    assert!(!find_opcode(&proto_o2_no_globals, &|op| matches!(op, OpCode::SetGlobalFast(_))));
+    assert!(find_opcode(&proto_o2_no_globals, &|op| matches!(
+        op,
+        OpCode::GetGlobal(_)
+    )));
+    assert!(find_opcode(&proto_o2_no_globals, &|op| matches!(
+        op,
+        OpCode::SetGlobal(_)
+    )));
+    assert!(!find_opcode(&proto_o2_no_globals, &|op| matches!(
+        op,
+        OpCode::GetGlobalFast(_)
+    )));
+    assert!(!find_opcode(&proto_o2_no_globals, &|op| matches!(
+        op,
+        OpCode::SetGlobalFast(_)
+    )));
 }
 
 #[test]
@@ -2218,7 +2429,8 @@ fn test_e5b_undefined_global_read_and_assign_errors() {
     let mut opt_globals = OptConfig::from_level(OptLevel::O0);
     opt_globals.apply_flags("globals", true).unwrap();
 
-    let proto_r_o0 = compiler::compile_with_opt(&stmts_read, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_r_o0 =
+        compiler::compile_with_opt(&stmts_read, OptConfig::from_level(OptLevel::O0)).unwrap();
     let proto_r_opt = compiler::compile_with_opt(&stmts_read, opt_globals.clone()).unwrap();
 
     let mut vm_r_o0 = Vm::with_output(Vec::new());
@@ -2227,13 +2439,20 @@ fn test_e5b_undefined_global_read_and_assign_errors() {
     let mut vm_r_opt = Vm::with_output(Vec::new());
     let err_r_opt = vm_r_opt.interpret(proto_r_opt).unwrap_err();
 
-    assert_eq!(err_r_o0, "[line 1] Error: Undefined variable 'variableInexistente'.");
-    assert_eq!(err_r_opt, "[line 1] Error: Undefined variable 'variableInexistente'.");
+    assert_eq!(
+        err_r_o0,
+        "[line 1] Error: Undefined variable 'variableInexistente'."
+    );
+    assert_eq!(
+        err_r_opt,
+        "[line 1] Error: Undefined variable 'variableInexistente'."
+    );
 
     let src_assign = "variableInexistente = 123;";
     let stmts_assign = parse_and_check(src_assign);
 
-    let proto_a_o0 = compiler::compile_with_opt(&stmts_assign, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_a_o0 =
+        compiler::compile_with_opt(&stmts_assign, OptConfig::from_level(OptLevel::O0)).unwrap();
     let proto_a_opt = compiler::compile_with_opt(&stmts_assign, opt_globals).unwrap();
 
     let mut vm_a_o0 = Vm::with_output(Vec::new());
@@ -2242,8 +2461,14 @@ fn test_e5b_undefined_global_read_and_assign_errors() {
     let mut vm_a_opt = Vm::with_output(Vec::new());
     let err_a_opt = vm_a_opt.interpret(proto_a_opt).unwrap_err();
 
-    assert_eq!(err_a_o0, "[line 1] Error: Undefined variable 'variableInexistente'.");
-    assert_eq!(err_a_opt, "[line 1] Error: Undefined variable 'variableInexistente'.");
+    assert_eq!(
+        err_a_o0,
+        "[line 1] Error: Undefined variable 'variableInexistente'."
+    );
+    assert_eq!(
+        err_a_opt,
+        "[line 1] Error: Undefined variable 'variableInexistente'."
+    );
 }
 
 #[test]
@@ -2326,13 +2551,15 @@ fn test_e5b_isolated_vm_instances() {
     let mut buf1 = Vec::new();
     let mut vm1 = Vm::with_output(&mut buf1);
     let stmts1 = parse_and_check("var x = \"primera\";");
-    vm1.interpret(compiler::compile_with_opt(&stmts1, OptConfig::default()).unwrap()).unwrap();
+    vm1.interpret(compiler::compile_with_opt(&stmts1, OptConfig::default()).unwrap())
+        .unwrap();
     vm1.interpret(proto.clone()).unwrap();
 
     let mut buf2 = Vec::new();
     let mut vm2 = Vm::with_output(&mut buf2);
     let stmts2 = parse_and_check("var x = \"segunda\";");
-    vm2.interpret(compiler::compile_with_opt(&stmts2, OptConfig::default()).unwrap()).unwrap();
+    vm2.interpret(compiler::compile_with_opt(&stmts2, OptConfig::default()).unwrap())
+        .unwrap();
     vm2.interpret(proto).unwrap();
 
     let out1 = String::from_utf8(buf1).unwrap().replace("\r\n", "\n");
@@ -2389,25 +2616,49 @@ fn test_e5c_bytecode_emission_and_flags() {
     let proto_o0 = compiler::compile_with_opt(&stmts, opt_o0).unwrap();
     assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::Add)));
     assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::Less)));
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::AddLocalConst(_, _))));
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::LessLocalConst(_, _))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::AddLocalConst(_, _)
+    )));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::LessLocalConst(_, _)
+    )));
 
     let mut opt_super = OptConfig::from_level(OptLevel::O0);
     opt_super.apply_flags("super", true).unwrap();
     let proto_super = compiler::compile_with_opt(&stmts, opt_super).unwrap();
-    assert!(find_opcode(&proto_super, &|op| matches!(op, OpCode::AddLocalConst(_, _))));
-    assert!(find_opcode(&proto_super, &|op| matches!(op, OpCode::LessLocalConst(_, _))));
+    assert!(find_opcode(&proto_super, &|op| matches!(
+        op,
+        OpCode::AddLocalConst(_, _)
+    )));
+    assert!(find_opcode(&proto_super, &|op| matches!(
+        op,
+        OpCode::LessLocalConst(_, _)
+    )));
 
     let opt_o2 = OptConfig::from_level(OptLevel::O2);
     let proto_o2 = compiler::compile_with_opt(&stmts, opt_o2).unwrap();
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::AddLocalConst(_, _))));
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::LessLocalConst(_, _))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::AddLocalConst(_, _)
+    )));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::LessLocalConst(_, _)
+    )));
 
     let mut opt_o2_no_super = OptConfig::from_level(OptLevel::O2);
     opt_o2_no_super.apply_flags("super", false).unwrap();
     let proto_o2_no_super = compiler::compile_with_opt(&stmts, opt_o2_no_super).unwrap();
-    assert!(!find_opcode(&proto_o2_no_super, &|op| matches!(op, OpCode::AddLocalConst(_, _))));
-    assert!(!find_opcode(&proto_o2_no_super, &|op| matches!(op, OpCode::LessLocalConst(_, _))));
+    assert!(!find_opcode(&proto_o2_no_super, &|op| matches!(
+        op,
+        OpCode::AddLocalConst(_, _)
+    )));
+    assert!(!find_opcode(&proto_o2_no_super, &|op| matches!(
+        op,
+        OpCode::LessLocalConst(_, _)
+    )));
 }
 
 #[test]
@@ -2459,7 +2710,8 @@ fn test_e5c_less_semantics() {
 fn test_e5c_type_errors_and_line_numbers() {
     let src1 = "{\nvar x = 10;\nprint x + \"err\";\n}";
     let stmts1 = parse_and_check(src1);
-    let proto_o0 = compiler::compile_with_opt(&stmts1, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_o0 =
+        compiler::compile_with_opt(&stmts1, OptConfig::from_level(OptLevel::O0)).unwrap();
     let mut opt_s = OptConfig::from_level(OptLevel::O0);
     opt_s.apply_flags("super", true).unwrap();
     let proto_s = compiler::compile_with_opt(&stmts1, opt_s.clone()).unwrap();
@@ -2469,12 +2721,19 @@ fn test_e5c_type_errors_and_line_numbers() {
     let mut vm_s = Vm::with_output(Vec::new());
     let err_s = vm_s.interpret(proto_s).unwrap_err();
 
-    assert_eq!(err_o0, "[line 3] Operands must be two numbers or two strings.");
-    assert_eq!(err_s, "[line 3] Operands must be two numbers or two strings.");
+    assert_eq!(
+        err_o0,
+        "[line 3] Operands must be two numbers or two strings."
+    );
+    assert_eq!(
+        err_s,
+        "[line 3] Operands must be two numbers or two strings."
+    );
 
     let src2 = "{\nvar x = \"foo\";\nprint x + 42;\n}";
     let stmts2 = parse_and_check(src2);
-    let proto_o0 = compiler::compile_with_opt(&stmts2, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_o0 =
+        compiler::compile_with_opt(&stmts2, OptConfig::from_level(OptLevel::O0)).unwrap();
     let proto_s = compiler::compile_with_opt(&stmts2, opt_s.clone()).unwrap();
 
     let mut vm_o0 = Vm::with_output(Vec::new());
@@ -2482,12 +2741,19 @@ fn test_e5c_type_errors_and_line_numbers() {
     let mut vm_s = Vm::with_output(Vec::new());
     let err_s = vm_s.interpret(proto_s).unwrap_err();
 
-    assert_eq!(err_o0, "[line 3] Operands must be two numbers or two strings.");
-    assert_eq!(err_s, "[line 3] Operands must be two numbers or two strings.");
+    assert_eq!(
+        err_o0,
+        "[line 3] Operands must be two numbers or two strings."
+    );
+    assert_eq!(
+        err_s,
+        "[line 3] Operands must be two numbers or two strings."
+    );
 
     let src3 = "{\nvar x = \"foo\";\nprint x < 42;\n}";
     let stmts3 = parse_and_check(src3);
-    let proto_o0 = compiler::compile_with_opt(&stmts3, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_o0 =
+        compiler::compile_with_opt(&stmts3, OptConfig::from_level(OptLevel::O0)).unwrap();
     let proto_s = compiler::compile_with_opt(&stmts3, opt_s.clone()).unwrap();
 
     let mut vm_o0 = Vm::with_output(Vec::new());
@@ -2500,7 +2766,8 @@ fn test_e5c_type_errors_and_line_numbers() {
 
     let src4 = "{\nvar x = 42;\nprint x < \"bar\";\n}";
     let stmts4 = parse_and_check(src4);
-    let proto_o0 = compiler::compile_with_opt(&stmts4, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_o0 =
+        compiler::compile_with_opt(&stmts4, OptConfig::from_level(OptLevel::O0)).unwrap();
     let proto_s = compiler::compile_with_opt(&stmts4, opt_s).unwrap();
 
     let mut vm_o0 = Vm::with_output(Vec::new());
@@ -2573,8 +2840,14 @@ fn test_e5c_globals_not_fused() {
     let proto = compiler::compile_with_opt(&stmts, opt_s).unwrap();
 
     // Las globales no deben fusionarse en superinstrucciones de locales
-    assert!(!find_opcode(&proto, &|op| matches!(op, OpCode::AddLocalConst(_, _))));
-    assert!(!find_opcode(&proto, &|op| matches!(op, OpCode::LessLocalConst(_, _))));
+    assert!(!find_opcode(&proto, &|op| matches!(
+        op,
+        OpCode::AddLocalConst(_, _)
+    )));
+    assert!(!find_opcode(&proto, &|op| matches!(
+        op,
+        OpCode::LessLocalConst(_, _)
+    )));
     assert!(find_opcode(&proto, &|op| matches!(op, OpCode::Add)));
     assert!(find_opcode(&proto, &|op| matches!(op, OpCode::Less)));
 }
@@ -2594,8 +2867,16 @@ fn test_e5c_constant_folding_priority() {
 
     // 1 + 2 debe plegarse en una constante (3) sin Add ni AddLocalConst
     // a + 2 debe fusionarse en AddLocalConst
-    let add_local_count = proto.chunk.code.iter().filter(|op| matches!(op, OpCode::AddLocalConst(_, _))).count();
-    assert_eq!(add_local_count, 1, "Solo a + 2 debe generar AddLocalConst; 1 + 2 debe resolverse en folding");
+    let add_local_count = proto
+        .chunk
+        .code
+        .iter()
+        .filter(|op| matches!(op, OpCode::AddLocalConst(_, _)))
+        .count();
+    assert_eq!(
+        add_local_count, 1,
+        "Solo a + 2 debe generar AddLocalConst; 1 + 2 debe resolverse en folding"
+    );
     assert!(!find_opcode(&proto, &|op| matches!(op, OpCode::Add)));
 }
 
@@ -2720,8 +3001,10 @@ fn test_f1_runtime_error_non_instance_receiver() {
 
     for src in cases {
         let stmts = parse_and_check(src);
-        let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
-        let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
+        let proto_o0 =
+            compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+        let proto_o2 =
+            compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
 
         let mut vm_o0 = Vm::with_output(Vec::new());
         let err_o0 = vm_o0.interpret(proto_o0).unwrap_err();
@@ -2746,27 +3029,45 @@ fn test_f2_bytecode_emission_and_flags() {
     // 1. -O0: SetLocal + Pop, NO SetLocalPop
     let opt_o0 = OptConfig::from_level(OptLevel::O0);
     let proto_o0 = compiler::compile_with_opt(&stmts, opt_o0).unwrap();
-    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::SetLocal(_))));
+    assert!(find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::SetLocal(_)
+    )));
     assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::Pop)));
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::SetLocalPop(_))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::SetLocalPop(_)
+    )));
 
     // 2. -O0 --opt=super: SetLocalPop activo
     let mut opt_super = OptConfig::from_level(OptLevel::O0);
     opt_super.apply_flags("super", true).unwrap();
     let proto_super = compiler::compile_with_opt(&stmts, opt_super).unwrap();
-    assert!(find_opcode(&proto_super, &|op| matches!(op, OpCode::SetLocalPop(_))));
+    assert!(find_opcode(&proto_super, &|op| matches!(
+        op,
+        OpCode::SetLocalPop(_)
+    )));
 
     // 3. -O2: SetLocalPop activo por defecto
     let opt_o2 = OptConfig::from_level(OptLevel::O2);
     let proto_o2 = compiler::compile_with_opt(&stmts, opt_o2).unwrap();
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::SetLocalPop(_))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::SetLocalPop(_)
+    )));
 
     // 4. -O2 --no-opt=super: SetLocalPop desactivado
     let mut opt_o2_no_super = OptConfig::from_level(OptLevel::O2);
     opt_o2_no_super.apply_flags("super", false).unwrap();
     let proto_o2_no_super = compiler::compile_with_opt(&stmts, opt_o2_no_super).unwrap();
-    assert!(!find_opcode(&proto_o2_no_super, &|op| matches!(op, OpCode::SetLocalPop(_))));
-    assert!(find_opcode(&proto_o2_no_super, &|op| matches!(op, OpCode::SetLocal(_))));
+    assert!(!find_opcode(&proto_o2_no_super, &|op| matches!(
+        op,
+        OpCode::SetLocalPop(_)
+    )));
+    assert!(find_opcode(&proto_o2_no_super, &|op| matches!(
+        op,
+        OpCode::SetLocal(_)
+    )));
 }
 
 #[test]
@@ -2789,8 +3090,14 @@ fn test_f2_chained_and_used_assignments() {
     // En a = b = 42:
     // b = 42 debe usar SetLocal (porque su resultado lo consume a = ...)
     // a = ... debe usar SetLocalPop (porque es la raíz de la sentencia)
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::SetLocalPop(_))));
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::SetLocal(_))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::SetLocalPop(_)
+    )));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::SetLocal(_)
+    )));
 
     let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
     let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
@@ -2871,21 +3178,26 @@ fn test_f2_error_evaluation_order_and_line() {
     let mut vm_o2 = Vm::with_output(Vec::new());
     let err_o2 = vm_o2.interpret(proto_o2).unwrap_err();
 
-    assert_eq!(err_o0, "[line 3] Error: Undefined variable 'undefined_global'.");
-    assert_eq!(err_o2, "[line 3] Error: Undefined variable 'undefined_global'.");
+    assert_eq!(
+        err_o0,
+        "[line 3] Error: Undefined variable 'undefined_global'."
+    );
+    assert_eq!(
+        err_o2,
+        "[line 3] Error: Undefined variable 'undefined_global'."
+    );
 }
 
 #[test]
 fn test_f2_audit_uninitialized_and_nested_scopes() {
     // 1. Asignaciones en inicializadores: x = 1 intenta escribir a global x (que no existe)
-    let cases_err = [
-        "{ var x = (x = 1); }",
-        "{ var x = ((x = 1)); }",
-    ];
+    let cases_err = ["{ var x = (x = 1); }", "{ var x = ((x = 1)); }"];
     for src in cases_err {
         let stmts = parse_and_check(src);
-        let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
-        let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
+        let proto_o0 =
+            compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
+        let proto_o2 =
+            compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
         let mut opt_no_super = OptConfig::from_level(OptLevel::O2);
         opt_no_super.apply_flags("super", false).unwrap();
         let proto_no_super = compiler::compile_with_opt(&stmts, opt_no_super).unwrap();

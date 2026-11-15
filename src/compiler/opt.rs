@@ -211,4 +211,3 @@ impl fmt::Display for OptConfig {
         write!(f, "{:?} [{}]", self.level, self.enabled_summary())
     }
 }
-

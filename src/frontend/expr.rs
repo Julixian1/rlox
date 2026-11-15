@@ -94,14 +94,9 @@ impl fmt::Display for LiteralValue {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     /// Expresión literal constante.
-    Literal {
-        value: LiteralValue,
-    },
+    Literal { value: LiteralValue },
     /// Operación unaria prefija (`-x`, `!y`).
-    Unary {
-        operator: Token,
-        right: Box<Expr>,
-    },
+    Unary { operator: Token, right: Box<Expr> },
     /// Operación binaria infija (`a + b`, `x == y`).
     Binary {
         left: Box<Expr>,
@@ -109,18 +104,11 @@ pub enum Expr {
         right: Box<Expr>,
     },
     /// Expresión agrupada entre paréntesis `(expr)`.
-    Grouping {
-        expression: Box<Expr>,
-    },
+    Grouping { expression: Box<Expr> },
     /// Acceso a una variable por identificador.
-    Variable {
-        name: Token,
-    },
+    Variable { name: Token },
     /// Asignación a una variable (`x = expr`).
-    Assign {
-        name: Token,
-        value: Box<Expr>,
-    },
+    Assign { name: Token, value: Box<Expr> },
     /// Asignación compuesta a una variable (`x += expr`, etc.).
     AssignModify {
         name: Token,
@@ -140,10 +128,7 @@ pub enum Expr {
         arguments: Vec<Expr>,
     },
     /// Acceso a propiedad de instancia (`object.name`).
-    Get {
-        object: Box<Expr>,
-        name: Token,
-    },
+    Get { object: Box<Expr>, name: Token },
     /// Asignación a propiedad de instancia (`object.name = value`).
     Set {
         object: Box<Expr>,
@@ -158,14 +143,9 @@ pub enum Expr {
         value: Box<Expr>,
     },
     /// Referencia a la instancia receptora actual (`this`).
-    This {
-        keyword: Token,
-    },
+    This { keyword: Token },
     /// Acceso a método de la superclase (`super.method`).
-    Super {
-        keyword: Token,
-        method: Token,
-    },
+    Super { keyword: Token, method: Token },
     /// Expresión condicional ternaria (`condition ? then_branch : else_branch`).
     Ternary {
         condition: Box<Expr>,
@@ -173,10 +153,7 @@ pub enum Expr {
         else_branch: Box<Expr>,
     },
     /// Literal de lista (`[elem1, elem2, ...]`).
-    List {
-        bracket: Token,
-        elements: Vec<Expr>,
-    },
+    List { bracket: Token, elements: Vec<Expr> },
     /// Acceso indexado a colección (`object[index]`).
     IndexGet {
         object: Box<Expr>,

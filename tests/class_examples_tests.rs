@@ -5,7 +5,10 @@
 use rlox::checker;
 use rlox::chunk::OpCode;
 use rlox::closure::FnProto;
-use rlox::compiler::{self, opt::{OptConfig, OptLevel}};
+use rlox::compiler::{
+    self,
+    opt::{OptConfig, OptLevel},
+};
 use rlox::interpreter::Interpreter;
 use rlox::parser::Parser;
 use rlox::resolver::Resolver;
@@ -166,7 +169,11 @@ where
 
 /// Helper para verificar un archivo de ejemplo consolidado contra Tree-Walk, VM -O0 y VM -O2,
 /// y validar el rechazo formal en Register VM (que no soporta clases).
-fn assert_consolidated_example_ok(file_path: &str, expected_stdout: &str, feature_markers: &[&str]) {
+fn assert_consolidated_example_ok(
+    file_path: &str,
+    expected_stdout: &str,
+    feature_markers: &[&str],
+) {
     let source = fs::read_to_string(file_path)
         .unwrap_or_else(|_| panic!("No se pudo leer el archivo {}", file_path));
 
@@ -239,7 +246,8 @@ fn assert_consolidated_example_ok(file_path: &str, expected_stdout: &str, featur
     assert!(
         reg_err.contains("Classes are not supported yet in the register backend.")
             || reg_err.contains("Properties are not supported yet in the register backend.")
-            || reg_err.contains("'this' and 'super' are not supported yet in the register backend."),
+            || reg_err
+                .contains("'this' and 'super' are not supported yet in the register backend."),
         "[{}] Error de Register VM no contiene mensaje esperado: {}",
         file_path,
         reg_err
@@ -435,7 +443,11 @@ print not_an_instance.campo;
 
     let reg = run_register_vm(source);
     assert!(reg.error.is_some());
-    assert!(reg.error.unwrap().contains("Properties are not supported yet in the register backend."));
+    assert!(
+        reg.error
+            .unwrap()
+            .contains("Properties are not supported yet in the register backend.")
+    );
 }
 
 #[test]
@@ -508,7 +520,9 @@ class Standalone {
     let stmts = parse_and_check(source);
     assert!(stmts.is_err());
     let err = stmts.unwrap_err();
-    assert!(err.contains("[line 4] Error at 'super': Can't use 'super' in a class with no superclass."));
+    assert!(
+        err.contains("[line 4] Error at 'super': Can't use 'super' in a class with no superclass.")
+    );
 
     assert!(run_treewalk(source).error.is_some());
     assert!(run_stack_vm(source, OptLevel::O0).error.is_some());
@@ -591,14 +605,29 @@ fn test_opt_prepare_invoke_direct_method_call() {
 
     // En -O0: no debe emitir PrepareInvoke ni Invoke, usa GetProperty + Call
     let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::PrepareInvoke(_))));
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::Invoke(_))));
-    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::GetProperty(_))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::PrepareInvoke(_)
+    )));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::Invoke(_)
+    )));
+    assert!(find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::GetProperty(_)
+    )));
 
     // En -O2: debe emitir PrepareInvoke e Invoke
     let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::PrepareInvoke(_))));
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::Invoke(_))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::PrepareInvoke(_)
+    )));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::Invoke(_)
+    )));
 
     // Salida identica en ambos niveles
     let res_o0 = run_stack_vm(source, OptLevel::O0);
@@ -623,12 +652,21 @@ fn test_opt_prepare_super_invoke() {
 
     // En -O0: no debe emitir PrepareSuperInvoke, usa GetSuper + Call
     let proto_o0 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O0)).unwrap();
-    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::PrepareSuperInvoke(_))));
-    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::GetSuper(_))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::PrepareSuperInvoke(_)
+    )));
+    assert!(find_opcode(&proto_o0, &|op| matches!(
+        op,
+        OpCode::GetSuper(_)
+    )));
 
     // En -O2: debe emitir PrepareSuperInvoke e Invoke
     let proto_o2 = compiler::compile_with_opt(&stmts, OptConfig::from_level(OptLevel::O2)).unwrap();
-    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::PrepareSuperInvoke(_))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(
+        op,
+        OpCode::PrepareSuperInvoke(_)
+    )));
 
     // Salida identica en ambos niveles
     let res_o0 = run_stack_vm(source, OptLevel::O0);

@@ -117,12 +117,12 @@ impl LoxFunction {
         match result {
             // Un error en tiempo de ejecución se propaga de inmediato sin convertirlo en 'this'.
             Err(ReturnSignal::Error(err)) => Err(ReturnSignal::Error(err)),
-            Err(ReturnSignal::Break) => {
-                Err(ReturnSignal::Error("Cannot break out of a function.".to_string()))
-            }
-            Err(ReturnSignal::Continue) => {
-                Err(ReturnSignal::Error("Cannot continue out of a function.".to_string()))
-            }
+            Err(ReturnSignal::Break) => Err(ReturnSignal::Error(
+                "Cannot break out of a function.".to_string(),
+            )),
+            Err(ReturnSignal::Continue) => Err(ReturnSignal::Error(
+                "Cannot continue out of a function.".to_string(),
+            )),
 
             // Retorno explícito: en inicializadores devuelve 'this'.
             Err(ReturnSignal::Return(value)) => {

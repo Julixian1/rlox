@@ -16,7 +16,10 @@
 //! - Rechazo explícito de propiedades en Register VM.
 
 use rlox::checker;
-use rlox::compiler::{self, opt::{OptConfig, OptLevel}};
+use rlox::compiler::{
+    self,
+    opt::{OptConfig, OptLevel},
+};
 use rlox::interpreter::Interpreter;
 use rlox::parser::Parser;
 use rlox::resolver::Resolver;
@@ -60,7 +63,12 @@ fn parse_and_check(source: &str) -> Result<Vec<Stmt>, String> {
 fn run_treewalk(source: &str) -> RunResult {
     let statements = match parse_and_check(source) {
         Ok(s) => s,
-        Err(e) => return RunResult { stdout: String::new(), error: Some(e) },
+        Err(e) => {
+            return RunResult {
+                stdout: String::new(),
+                error: Some(e),
+            };
+        }
     };
 
     let mut resolver = Resolver::new();
@@ -76,7 +84,9 @@ fn run_treewalk(source: &str) -> RunResult {
     let err = interpreter.interpret(&statements).err();
     let stdout = {
         let bytes = output_arc.lock().unwrap().clone();
-        String::from_utf8(bytes).unwrap_or_default().replace("\r\n", "\n")
+        String::from_utf8(bytes)
+            .unwrap_or_default()
+            .replace("\r\n", "\n")
     };
 
     RunResult { stdout, error: err }
@@ -85,13 +95,23 @@ fn run_treewalk(source: &str) -> RunResult {
 fn run_stack_vm(source: &str, opt_level: OptLevel) -> RunResult {
     let statements = match parse_and_check(source) {
         Ok(s) => s,
-        Err(e) => return RunResult { stdout: String::new(), error: Some(e) },
+        Err(e) => {
+            return RunResult {
+                stdout: String::new(),
+                error: Some(e),
+            };
+        }
     };
 
     let opt_config = OptConfig::from_level(opt_level);
     let proto = match compiler::compile_with_opt(&statements, opt_config) {
         Ok(p) => p,
-        Err(e) => return RunResult { stdout: String::new(), error: Some(e) },
+        Err(e) => {
+            return RunResult {
+                stdout: String::new(),
+                error: Some(e),
+            };
+        }
     };
 
     let mut output = Vec::new();
@@ -99,7 +119,9 @@ fn run_stack_vm(source: &str, opt_level: OptLevel) -> RunResult {
         let mut vm = Vm::with_output(&mut output);
         vm.interpret(proto).err()
     };
-    let stdout = String::from_utf8(output).unwrap_or_default().replace("\r\n", "\n");
+    let stdout = String::from_utf8(output)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
 
     RunResult { stdout, error: err }
 }
@@ -107,12 +129,22 @@ fn run_stack_vm(source: &str, opt_level: OptLevel) -> RunResult {
 fn run_register_vm(source: &str) -> RunResult {
     let statements = match parse_and_check(source) {
         Ok(s) => s,
-        Err(e) => return RunResult { stdout: String::new(), error: Some(e) },
+        Err(e) => {
+            return RunResult {
+                stdout: String::new(),
+                error: Some(e),
+            };
+        }
     };
 
     let proto = match rlox::compiler::reg::codegen::compile(&statements) {
         Ok(p) => p,
-        Err(e) => return RunResult { stdout: String::new(), error: Some(e) },
+        Err(e) => {
+            return RunResult {
+                stdout: String::new(),
+                error: Some(e),
+            };
+        }
     };
 
     let mut output = Vec::new();
@@ -120,7 +152,9 @@ fn run_register_vm(source: &str) -> RunResult {
         let mut vm = rlox::compiler::reg::vm::RegVm::with_output(&mut output);
         vm.interpret(proto).err()
     };
-    let stdout = String::from_utf8(output).unwrap_or_default().replace("\r\n", "\n");
+    let stdout = String::from_utf8(output)
+        .unwrap_or_default()
+        .replace("\r\n", "\n");
 
     RunResult { stdout, error: err }
 }
@@ -133,15 +167,34 @@ fn assert_all_backends_ok(source: &str, expected_stdout: &str) {
     let vm_o2 = run_stack_vm(source, OptLevel::O2);
     let reg = run_register_vm(source);
 
-    assert!(tw.error.is_none(), "TreeWalk fallo inesperadamente: {:?}", tw.error);
-    assert!(vm_o0.error.is_none(), "VM -O0 fallo inesperadamente: {:?}", vm_o0.error);
-    assert!(vm_o2.error.is_none(), "VM -O2 fallo inesperadamente: {:?}", vm_o2.error);
-    assert!(reg.error.is_none(), "Register VM fallo inesperadamente: {:?}", reg.error);
+    assert!(
+        tw.error.is_none(),
+        "TreeWalk fallo inesperadamente: {:?}",
+        tw.error
+    );
+    assert!(
+        vm_o0.error.is_none(),
+        "VM -O0 fallo inesperadamente: {:?}",
+        vm_o0.error
+    );
+    assert!(
+        vm_o2.error.is_none(),
+        "VM -O2 fallo inesperadamente: {:?}",
+        vm_o2.error
+    );
+    assert!(
+        reg.error.is_none(),
+        "Register VM fallo inesperadamente: {:?}",
+        reg.error
+    );
 
     assert_eq!(tw.stdout, expected_stdout, "TreeWalk stdout no coincide");
     assert_eq!(vm_o0.stdout, expected_stdout, "VM -O0 stdout no coincide");
     assert_eq!(vm_o2.stdout, expected_stdout, "VM -O2 stdout no coincide");
-    assert_eq!(reg.stdout, expected_stdout, "Register VM stdout no coincide");
+    assert_eq!(
+        reg.stdout, expected_stdout,
+        "Register VM stdout no coincide"
+    );
 }
 
 /// Helper para verificar paridad entre TreeWalk, Stack VM -O0 y Stack VM -O2 para propiedades de clases,
@@ -151,9 +204,21 @@ fn assert_class_backends_ok(source: &str, expected_stdout: &str) {
     let vm_o0 = run_stack_vm(source, OptLevel::O0);
     let vm_o2 = run_stack_vm(source, OptLevel::O2);
 
-    assert!(tw.error.is_none(), "TreeWalk fallo inesperadamente: {:?}", tw.error);
-    assert!(vm_o0.error.is_none(), "VM -O0 fallo inesperadamente: {:?}", vm_o0.error);
-    assert!(vm_o2.error.is_none(), "VM -O2 fallo inesperadamente: {:?}", vm_o2.error);
+    assert!(
+        tw.error.is_none(),
+        "TreeWalk fallo inesperadamente: {:?}",
+        tw.error
+    );
+    assert!(
+        vm_o0.error.is_none(),
+        "VM -O0 fallo inesperadamente: {:?}",
+        vm_o0.error
+    );
+    assert!(
+        vm_o2.error.is_none(),
+        "VM -O2 fallo inesperadamente: {:?}",
+        vm_o2.error
+    );
 
     assert_eq!(tw.stdout, expected_stdout, "TreeWalk stdout no coincide");
     assert_eq!(vm_o0.stdout, expected_stdout, "VM -O0 stdout no coincide");
@@ -161,10 +226,14 @@ fn assert_class_backends_ok(source: &str, expected_stdout: &str) {
 
     // Register VM debe rechazar propiedades o clases explicitamente
     let reg = run_register_vm(source);
-    assert!(reg.error.is_some(), "Register VM debio fallar ante clases/propiedades");
+    assert!(
+        reg.error.is_some(),
+        "Register VM debio fallar ante clases/propiedades"
+    );
     let reg_err = reg.error.unwrap();
     assert!(
-        reg_err.contains("Classes are not supported") || reg_err.contains("Properties are not supported"),
+        reg_err.contains("Classes are not supported")
+            || reg_err.contains("Properties are not supported"),
         "Register VM emitio un error no esperado: {}",
         reg_err
     );
@@ -553,9 +622,18 @@ fn test_compound_assign_error_on_non_instance_receiver() {
     let vm_o0 = run_stack_vm(source, OptLevel::O0);
     let vm_o2 = run_stack_vm(source, OptLevel::O2);
 
-    assert!(tw.stdout.is_empty(), "TreeWalk ejecuto efectos secundarios indebidos");
-    assert!(vm_o0.stdout.is_empty(), "VM -O0 ejecuto efectos secundarios indebidos");
-    assert!(vm_o2.stdout.is_empty(), "VM -O2 ejecuto efectos secundarios indebidos");
+    assert!(
+        tw.stdout.is_empty(),
+        "TreeWalk ejecuto efectos secundarios indebidos"
+    );
+    assert!(
+        vm_o0.stdout.is_empty(),
+        "VM -O0 ejecuto efectos secundarios indebidos"
+    );
+    assert!(
+        vm_o2.stdout.is_empty(),
+        "VM -O2 ejecuto efectos secundarios indebidos"
+    );
 
     assert_class_backends_runtime_error(source, 8, "Only instances have fields.");
 }
@@ -578,9 +656,18 @@ fn test_compound_assign_error_undefined_property_before_value() {
     let vm_o0 = run_stack_vm(source, OptLevel::O0);
     let vm_o2 = run_stack_vm(source, OptLevel::O2);
 
-    assert!(tw.stdout.is_empty(), "TreeWalk ejecuto efectos secundarios indebidos");
-    assert!(vm_o0.stdout.is_empty(), "VM -O0 ejecuto efectos secundarios indebidos");
-    assert!(vm_o2.stdout.is_empty(), "VM -O2 ejecuto efectos secundarios indebidos");
+    assert!(
+        tw.stdout.is_empty(),
+        "TreeWalk ejecuto efectos secundarios indebidos"
+    );
+    assert!(
+        vm_o0.stdout.is_empty(),
+        "VM -O0 ejecuto efectos secundarios indebidos"
+    );
+    assert!(
+        vm_o2.stdout.is_empty(),
+        "VM -O2 ejecuto efectos secundarios indebidos"
+    );
 
     assert_class_backends_runtime_error(source, 10, "Undefined property 'nonExistent'.");
 }
@@ -628,6 +715,8 @@ fn test_compound_assign_read_in_own_initializer() {
     "#;
     let res = parse_and_check(source);
     assert!(res.is_err());
-    assert!(res.unwrap_err().contains("Can't read local variable in its own initializer."));
+    assert!(
+        res.unwrap_err()
+            .contains("Can't read local variable in its own initializer.")
+    );
 }
-

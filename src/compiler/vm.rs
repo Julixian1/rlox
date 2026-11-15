@@ -103,11 +103,13 @@ impl<W: Write> Vm<W> {
         ))));
         let pop_slot = vm.global_values.len();
         vm.global_names.insert("pop".to_string(), pop_slot);
-        vm.global_values.push(Some(Value::NativeFn(std::rc::Rc::new(crate::value::NativeFn {
-            name: "pop".to_string(),
-            arity: 1,
-            func: crate::value::native_pop,
-        }))));
+        vm.global_values.push(Some(Value::NativeFn(std::rc::Rc::new(
+            crate::value::NativeFn {
+                name: "pop".to_string(),
+                arity: 1,
+                func: crate::value::native_pop,
+            },
+        ))));
         vm
     }
 
