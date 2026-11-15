@@ -64,6 +64,10 @@ pub enum OpCode {
     // Herencia
     Inherit,
     GetSuper(u16),
+
+    // Superinstrucciones (E5.C)
+    AddLocalConst(u8, u16),
+    LessLocalConst(u8, u16),
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -196,6 +200,15 @@ impl Chunk {
                 )
             }
             OpCode::Call(n) | OpCode::Invoke(n) => format!("{:<14} {:4}", name_of(&op), n),
+            OpCode::AddLocalConst(slot, k) | OpCode::LessLocalConst(slot, k) => {
+                format!(
+                    "{:<14} slot:{} const:{} '{}'",
+                    name_of(&op),
+                    slot,
+                    k,
+                    self.constants[k as usize]
+                )
+            }
             _ => name_of(&op).to_string(),
         };
         format!("{offset:04} {line} {detail}")
@@ -248,6 +261,8 @@ fn name_of(op: &OpCode) -> &'static str {
         OpCode::PrepareInvoke(_) => "OP_PREPARE_INVOKE",
         OpCode::PrepareSuperInvoke(_) => "OP_PREPARE_SUPER_INVOKE",
         OpCode::Invoke(_) => "OP_INVOKE",
+        OpCode::AddLocalConst(_, _) => "OP_ADD_LOCAL_CONST",
+        OpCode::LessLocalConst(_, _) => "OP_LESS_LOCAL_CONST",
     }
 }
 

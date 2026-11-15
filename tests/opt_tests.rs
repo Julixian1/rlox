@@ -39,10 +39,13 @@ fn run_with_opt(source: &str, opt: OptConfig) -> (String, Vec<rlox::chunk::OpCod
 fn test_e2_value_representation_size() {
     let size_val = std::mem::size_of::<rlox::value::Value>();
     let size_fn = std::mem::size_of::<rlox::compiler::function::LoxFunction>();
+    let size_op = std::mem::size_of::<rlox::chunk::OpCode>();
     println!("SIZEOF_VALUE = {}", size_val);
     println!("SIZEOF_LOX_FUNCTION = {}", size_fn);
+    println!("SIZEOF_OPCODE = {}", size_op);
     assert_eq!(size_fn, 120);
     assert_eq!(size_val, 24);
+    assert_eq!(size_op, 4);
 }
 
 #[test]
@@ -131,6 +134,7 @@ fn test_e1_levels_produce_identical_bytecode_and_output() {
             opt_no_opts.apply_flags("jumps", false).unwrap();
             opt_no_opts.apply_flags("invoke", false).unwrap();
             opt_no_opts.apply_flags("globals", false).unwrap();
+            opt_no_opts.apply_flags("super", false).unwrap();
             let (_, code_no_opts) = run_with_opt(source, opt_no_opts);
             assert_eq!(
                 code_base, code_no_opts,
@@ -2487,4 +2491,268 @@ fn test_e5b_composition_with_all_optimizations() {
     assert_eq!(out_g, expected);
     assert_eq!(out_o2, expected);
     assert_eq!(out_o2_no_g, expected);
+}
+
+// ============================================================================
+// E5.C — Superinstructions (AddLocalConst / LessLocalConst)
+// ============================================================================
+
+#[test]
+fn test_e5c_size_of_opcode_is_4() {
+    assert_eq!(std::mem::size_of::<OpCode>(), 4);
+}
+
+#[test]
+fn test_e5c_bytecode_emission_and_flags() {
+    let src = r#"
+        {
+            var a = 1;
+            var b = a + 2;
+            var c = a < 10;
+        }
+    "#;
+    let stmts = parse_and_check(src);
+
+    // 1. -O0: no superinstrucciones
+    let opt_o0 = OptConfig::from_level(OptLevel::O0);
+    let proto_o0 = compiler::compile_with_opt(&stmts, opt_o0).unwrap();
+    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::Add)));
+    assert!(find_opcode(&proto_o0, &|op| matches!(op, OpCode::Less)));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::AddLocalConst(_, _))));
+    assert!(!find_opcode(&proto_o0, &|op| matches!(op, OpCode::LessLocalConst(_, _))));
+
+    // 2. -O0 --opt=super: debe emitir superinstrucciones
+    let mut opt_super = OptConfig::from_level(OptLevel::O0);
+    opt_super.apply_flags("super", true).unwrap();
+    let proto_super = compiler::compile_with_opt(&stmts, opt_super).unwrap();
+    assert!(find_opcode(&proto_super, &|op| matches!(op, OpCode::AddLocalConst(_, _))));
+    assert!(find_opcode(&proto_super, &|op| matches!(op, OpCode::LessLocalConst(_, _))));
+
+    // 3. -O2: superinstrucciones activas por defecto
+    let opt_o2 = OptConfig::from_level(OptLevel::O2);
+    let proto_o2 = compiler::compile_with_opt(&stmts, opt_o2).unwrap();
+    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::AddLocalConst(_, _))));
+    assert!(find_opcode(&proto_o2, &|op| matches!(op, OpCode::LessLocalConst(_, _))));
+
+    // 4. -O2 --no-opt=super: superinstrucciones desactivadas
+    let mut opt_o2_no_super = OptConfig::from_level(OptLevel::O2);
+    opt_o2_no_super.apply_flags("super", false).unwrap();
+    let proto_o2_no_super = compiler::compile_with_opt(&stmts, opt_o2_no_super).unwrap();
+    assert!(!find_opcode(&proto_o2_no_super, &|op| matches!(op, OpCode::AddLocalConst(_, _))));
+    assert!(!find_opcode(&proto_o2_no_super, &|op| matches!(op, OpCode::LessLocalConst(_, _))));
+}
+
+#[test]
+fn test_e5c_addition_semantics_numbers_and_strings() {
+    let src = r#"
+        {
+            var x = 100;
+            print x + 50;
+
+            var s = "hello";
+            print s + " world";
+        }
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_s = OptConfig::from_level(OptLevel::O0);
+    opt_s.apply_flags("super", true).unwrap();
+    let (out_s, _) = run_with_opt(src, opt_s);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    let expected = "150\nhello world\n";
+    assert_eq!(out_o0, expected);
+    assert_eq!(out_s, expected);
+    assert_eq!(out_o2, expected);
+}
+
+#[test]
+fn test_e5c_less_semantics() {
+    let src = r#"
+        {
+            var x = 10;
+            print x < 20;
+            print x < 5;
+            print x < 10;
+        }
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_s = OptConfig::from_level(OptLevel::O0);
+    opt_s.apply_flags("super", true).unwrap();
+    let (out_s, _) = run_with_opt(src, opt_s);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    let expected = "true\nfalse\nfalse\n";
+    assert_eq!(out_o0, expected);
+    assert_eq!(out_s, expected);
+    assert_eq!(out_o2, expected);
+}
+
+#[test]
+fn test_e5c_type_errors_and_line_numbers() {
+    // 1. Number + String
+    let src1 = "{\nvar x = 10;\nprint x + \"err\";\n}";
+    let stmts1 = parse_and_check(src1);
+    let proto_o0 = compiler::compile_with_opt(&stmts1, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let mut opt_s = OptConfig::from_level(OptLevel::O0);
+    opt_s.apply_flags("super", true).unwrap();
+    let proto_s = compiler::compile_with_opt(&stmts1, opt_s.clone()).unwrap();
+
+    let mut vm_o0 = Vm::with_output(Vec::new());
+    let err_o0 = vm_o0.interpret(proto_o0).unwrap_err();
+    let mut vm_s = Vm::with_output(Vec::new());
+    let err_s = vm_s.interpret(proto_s).unwrap_err();
+
+    assert_eq!(err_o0, "[line 3] Operands must be two numbers or two strings.");
+    assert_eq!(err_s, "[line 3] Operands must be two numbers or two strings.");
+
+    // 2. String + Number
+    let src2 = "{\nvar x = \"foo\";\nprint x + 42;\n}";
+    let stmts2 = parse_and_check(src2);
+    let proto_o0 = compiler::compile_with_opt(&stmts2, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_s = compiler::compile_with_opt(&stmts2, opt_s.clone()).unwrap();
+
+    let mut vm_o0 = Vm::with_output(Vec::new());
+    let err_o0 = vm_o0.interpret(proto_o0).unwrap_err();
+    let mut vm_s = Vm::with_output(Vec::new());
+    let err_s = vm_s.interpret(proto_s).unwrap_err();
+
+    assert_eq!(err_o0, "[line 3] Operands must be two numbers or two strings.");
+    assert_eq!(err_s, "[line 3] Operands must be two numbers or two strings.");
+
+    // 3. String < Number
+    let src3 = "{\nvar x = \"foo\";\nprint x < 42;\n}";
+    let stmts3 = parse_and_check(src3);
+    let proto_o0 = compiler::compile_with_opt(&stmts3, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_s = compiler::compile_with_opt(&stmts3, opt_s.clone()).unwrap();
+
+    let mut vm_o0 = Vm::with_output(Vec::new());
+    let err_o0 = vm_o0.interpret(proto_o0).unwrap_err();
+    let mut vm_s = Vm::with_output(Vec::new());
+    let err_s = vm_s.interpret(proto_s).unwrap_err();
+
+    assert_eq!(err_o0, "[line 3] Operands must be numbers.");
+    assert_eq!(err_s, "[line 3] Operands must be numbers.");
+
+    // 4. Number < String
+    let src4 = "{\nvar x = 42;\nprint x < \"bar\";\n}";
+    let stmts4 = parse_and_check(src4);
+    let proto_o0 = compiler::compile_with_opt(&stmts4, OptConfig::from_level(OptLevel::O0)).unwrap();
+    let proto_s = compiler::compile_with_opt(&stmts4, opt_s).unwrap();
+
+    let mut vm_o0 = Vm::with_output(Vec::new());
+    let err_o0 = vm_o0.interpret(proto_o0).unwrap_err();
+    let mut vm_s = Vm::with_output(Vec::new());
+    let err_s = vm_s.interpret(proto_s).unwrap_err();
+
+    assert_eq!(err_o0, "[line 3] Operands must be numbers.");
+    assert_eq!(err_s, "[line 3] Operands must be numbers.");
+}
+
+#[test]
+fn test_e5c_nested_loops_and_counters() {
+    let src = r#"
+        {
+            var sum = 0;
+            var i = 0;
+            while (i < 5) {
+                var j = 0;
+                while (j < 5) {
+                    sum = sum + 1;
+                    j = j + 1;
+                }
+                i = i + 1;
+            }
+            print sum;
+        }
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_s = OptConfig::from_level(OptLevel::O0);
+    opt_s.apply_flags("super", true).unwrap();
+    let (out_s, _) = run_with_opt(src, opt_s);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    assert_eq!(out_o0, "25\n");
+    assert_eq!(out_s, "25\n");
+    assert_eq!(out_o2, "25\n");
+}
+
+#[test]
+fn test_e5c_function_params_and_recursion() {
+    let src = r#"
+        fun fib(n) {
+            if (n < 2) return n;
+            return fib(n + -1) + fib(n + -2);
+        }
+        print fib(10);
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_s = OptConfig::from_level(OptLevel::O0);
+    opt_s.apply_flags("super", true).unwrap();
+    let (out_s, _) = run_with_opt(src, opt_s);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    assert_eq!(out_o0, "55\n");
+    assert_eq!(out_s, "55\n");
+    assert_eq!(out_o2, "55\n");
+}
+
+#[test]
+fn test_e5c_globals_not_fused() {
+    let src = r#"
+        var g = 10;
+        print g + 5;
+        print g < 20;
+    "#;
+    let stmts = parse_and_check(src);
+    let mut opt_s = OptConfig::from_level(OptLevel::O0);
+    opt_s.apply_flags("super", true).unwrap();
+    let proto = compiler::compile_with_opt(&stmts, opt_s).unwrap();
+
+    // Las globales no deben fusionarse en superinstrucciones de locales
+    assert!(!find_opcode(&proto, &|op| matches!(op, OpCode::AddLocalConst(_, _))));
+    assert!(!find_opcode(&proto, &|op| matches!(op, OpCode::LessLocalConst(_, _))));
+    assert!(find_opcode(&proto, &|op| matches!(op, OpCode::Add)));
+    assert!(find_opcode(&proto, &|op| matches!(op, OpCode::Less)));
+}
+
+#[test]
+fn test_e5c_constant_folding_priority() {
+    let src = r#"
+        {
+            var a = 10;
+            print 1 + 2;
+            print a + 2;
+        }
+    "#;
+    let stmts = parse_and_check(src);
+    let opt_o2 = OptConfig::from_level(OptLevel::O2);
+    let proto = compiler::compile_with_opt(&stmts, opt_o2).unwrap();
+
+    // 1 + 2 debe plegarse en una constante (3) sin Add ni AddLocalConst
+    // a + 2 debe fusionarse en AddLocalConst
+    let add_local_count = proto.chunk.code.iter().filter(|op| matches!(op, OpCode::AddLocalConst(_, _))).count();
+    assert_eq!(add_local_count, 1, "Solo a + 2 debe generar AddLocalConst; 1 + 2 debe resolverse en folding");
+    assert!(!find_opcode(&proto, &|op| matches!(op, OpCode::Add)));
+}
+
+#[test]
+fn test_e5c_chained_operations_and_grouping() {
+    let src = r#"
+        {
+            var x = 10;
+            print x + 5 + 3;
+            print (x) + (5);
+            print (x) < (20);
+        }
+    "#;
+    let (out_o0, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O0));
+    let mut opt_s = OptConfig::from_level(OptLevel::O0);
+    opt_s.apply_flags("super", true).unwrap();
+    let (out_s, _) = run_with_opt(src, opt_s);
+    let (out_o2, _) = run_with_opt(src, OptConfig::from_level(OptLevel::O2));
+
+    let expected = "18\n15\ntrue\n";
+    assert_eq!(out_o0, expected);
+    assert_eq!(out_s, expected);
+    assert_eq!(out_o2, expected);
 }

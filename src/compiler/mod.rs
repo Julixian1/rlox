@@ -491,6 +491,27 @@ fn is_safe_literal(val: &Value) -> bool {
     )
 }
 
+fn extract_var_name(expr: &Expr) -> Option<&Token> {
+    match expr {
+        Expr::Variable { name } => Some(name),
+        Expr::Grouping { expression } => extract_var_name(expression),
+        _ => None,
+    }
+}
+
+fn extract_literal(expr: &Expr) -> Option<Value> {
+    match expr {
+        Expr::Literal { value } => match value {
+            LiteralValue::Number(n) => Some(Value::Number(*n)),
+            LiteralValue::StringVal(s) => Some(Value::String(s.clone())),
+            LiteralValue::Bool(b) => Some(Value::Boolean(*b)),
+            LiteralValue::Nil => Some(Value::Nil),
+        },
+        Expr::Grouping { expression } => extract_literal(expression),
+        _ => None,
+    }
+}
+
 impl ExprVisitor<CResult> for Compiler {
     fn visit_literal_expr(&mut self, value: &LiteralValue) -> CResult {
         match value {
@@ -542,6 +563,33 @@ impl ExprVisitor<CResult> for Compiler {
             if let Some(val) = self.try_eval_binary(left, &operator.token_type, right) {
                 self.line = operator.line;
                 return self.emit_constant_val(val);
+            }
+        }
+
+        if self.opt.superinstructions {
+            if matches!(operator.token_type, TokenType::Plus | TokenType::Less) {
+                if let Some(name) = extract_var_name(left) {
+                    if let Some(slot) = self.state().resolve_local(&name.lexeme) {
+                        if slot <= u8::MAX as usize {
+                            let const_val = if self.opt.constant_folding {
+                                self.try_eval_const(right)
+                            } else {
+                                extract_literal(right)
+                            };
+
+                            if let Some(val) = const_val {
+                                let k = self.make_constant(val)?;
+                                self.line = operator.line;
+                                if operator.token_type == TokenType::Plus {
+                                    self.emit(OpCode::AddLocalConst(slot as u8, k));
+                                } else {
+                                    self.emit(OpCode::LessLocalConst(slot as u8, k));
+                                }
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
             }
         }
 

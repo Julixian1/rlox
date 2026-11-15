@@ -756,6 +756,44 @@ impl<W: Write> Vm<W> {
                     base = caller.base;
                     ic_base = caller.ic_base;
                 }
+                OpCode::AddLocalConst(slot, k) => {
+                    let a = &self.stack[base + slot as usize];
+                    let b = &chunk.constants[k as usize];
+                    match (a, b) {
+                        (Value::Number(x), Value::Number(y)) => {
+                            self.stack.push(Value::Number(x + y));
+                        }
+                        (Value::String(x), Value::String(y)) => {
+                            let mut s = String::with_capacity(x.len() + y.len());
+                            s.push_str(x);
+                            s.push_str(y);
+                            self.stack.push(Value::String(s));
+                        }
+                        _ => {
+                            return Err(Self::error(
+                                chunk,
+                                ip,
+                                "Operands must be two numbers or two strings.",
+                            ));
+                        }
+                    }
+                }
+                OpCode::LessLocalConst(slot, k) => {
+                    let a = &self.stack[base + slot as usize];
+                    let b = &chunk.constants[k as usize];
+                    match (a, b) {
+                        (Value::Number(x), Value::Number(y)) => {
+                            self.stack.push(Value::Boolean(x < y));
+                        }
+                        _ => {
+                            return Err(Self::error(
+                                chunk,
+                                ip,
+                                "Operands must be numbers.",
+                            ));
+                        }
+                    }
+                }
             }
         }
     }
