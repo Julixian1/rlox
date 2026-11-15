@@ -222,6 +222,69 @@ Para compilar en modo release:
 cargo build --release --bin rlox --bin rlox-bench
 ```
 
+## Uso real: simulador de ahorro
+
+Más allá de las pruebas automáticas, `rlox` puede ejecutar programas con un objetivo concreto. El archivo `examples/ahorro.lox` simula la evolución de un ahorro durante 12 meses y determina si alcanza un objetivo definido.
+
+```lox
+fun crear_interes(tasa) {
+  fun aplicar_interes(saldo) {
+    return saldo + saldo * tasa;
+  }
+  return aplicar_interes;
+}
+
+fun alcanza_objetivo(saldo, objetivo) {
+  if (saldo >= objetivo) {
+    return true;
+  }
+  return false;
+}
+
+var saldo = 500;
+var objetivo = 700;
+var meses = 0;
+var aplicar_interes = crear_interes(0.02);
+
+while (meses < 12) {
+  saldo = aplicar_interes(saldo);
+  meses = meses + 1;
+}
+
+print "Saldo despues de 12 meses:";
+print saldo;
+
+if (alcanza_objetivo(saldo, objetivo)) {
+  print "Objetivo alcanzado";
+} else {
+  print "Objetivo no alcanzado";
+}
+```
+
+Se ejecuta con cualquiera de los tres backends:
+
+```bash
+cargo run -- examples/ahorro.lox        # tree-walk
+cargo run -- --vm examples/ahorro.lox   # VM de pila
+cargo run -- --reg examples/ahorro.lox  # VM de registros
+```
+
+La salida es:
+
+```
+Saldo despues de 12 meses:
+634.1208972812726
+Objetivo no alcanzado
+```
+
+Este ejemplo muestra que el lenguaje puede expresar un programa completo con un objetivo concreto, no solamente evaluar expresiones aisladas. En particular, combina:
+
+- **Variables y asignaciones** (`var`, `=`)
+- **Operaciones aritméticas** sobre números de punto flotante
+- **Funciones con parámetros y retorno**
+- **Condicionales** (`if`/`else`) y un **bucle** (`while`)
+- **Closures**: `crear_interes` devuelve la función interna `aplicar_interes`, que conserva el valor de `tasa` del entorno donde fue definida. Cada llamada en el bucle aplica el mismo interés porque la función captura la variable del scope externo.
+
 ## Decisiones de diseño y arquitectura
 
 A partir de la experiencia de la entrega parcial y de las sugerencias del docente evaluador, se consolidaron las siguientes decisiones de diseño estructurales en `rlox`:
@@ -329,7 +392,11 @@ Media geométrica de los 14 speedups:
 
 Ninguno de los 14 benchmarks empeoró. Las ganancias son grandes en código aritmético, con constantes, con globales y en bucles. Son chicas en `strings` y `mixed`, donde el costo está en la memoria y no en el despacho de instrucciones.
 
-Equipo de medición: AMD Ryzen 5 3500, 16 GB de RAM, Windows 11, `rustc 1.98.1`.
+#### Interpretación de los gráficos
+
+- **Descenso sostenido (Figura 1):** En todos los casos se observa una reducción escalonada del tiempo: primero por las mejoras de runtime (`-O0`) y luego un salto todavía mayor con los pases del compilador (`-O2`).
+- **Picos en aritmética y bucles (Figura 2):** Los mayores factores de aceleración ocurren en `const_expr` (5,00×) y `loops_nested` (3,56×), donde el *constant folding* y las superinstrucciones eliminan directamente la emisión y despacho de instrucciones repetitivas.
+- **Límite en operaciones de memoria:** En `strings` (1,26×) y `mixed` (1,37×) la aceleración es menor porque el costo principal reside en la reserva y copia de memoria en el heap, cuello de botella que las optimizaciones a nivel bytecode no pueden evitar.
 
 ### Cómo reproducirlo
 
