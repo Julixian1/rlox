@@ -114,7 +114,7 @@ cargo run -- --vm examples/ahorro.lox
 
 ### VM de registros
 
-Además de la VM de pila se implementó un backend experimental basado en registros.
+Además de la VM de pila se implementó un backend experimental basado en registros (mencionado en clase).
 Su objetivo es comparar dos modelos de ejecución:
 
 - en la VM de pila, las instrucciones consumen y producen valores en una pila;
@@ -357,7 +357,7 @@ Se probaron y descartaron otras dos: un peephole genérico sobre el bytecode (ga
 
 ### Benchmark optimizaciones
 
-Tema optimizaciones se midió con `rlox-bench`, que mide solo la ejecución en memoria. Cada cifra es la mediana de 15 repeticiones intercaladas después de 5 de calentamiento, en milisegundos, compilado en `--release`. Las columnas son la línea de base, la versión actual con las optimizaciones de compilador apagadas (`-O0`, que ya incluye las de runtime) y la actual con todo activo (`-O2`).
+Las mejoras en optimizaciones se midieron con `rlox-bench`, que mide solo la ejecución en memoria. Cada cifra es la mediana de 15 repeticiones intercaladas después de 5 de calentamiento, en milisegundos, compilado en `--release`. Las columnas son la línea de base, la versión actual con las optimizaciones de compilador apagadas (`-O0`, que ya incluye las de runtime) y la actual con todo activo (`-O2`).
 
 | Benchmark | Base (ms) | `-O0` (ms) | `-O2` (ms) | Speedup total |
 | :--- | ---: | ---: | ---: | ---: |
@@ -415,7 +415,7 @@ rlox --vm -O0 --opt=fold programa.lox
 rlox --vm -O2 --no-opt=super programa.lox
 ```
 
-Los pases son `fold`, `dce`, `jumps`, `super`, `invoke` y `globals`. También se pueden elegir con la variable de entorno `RLOX_OPT`.
+Los pases son `fold`, `dce`, `jumps`, `super`, `invoke` y `globals`.
 
 # Benchmark: comparación de los cuatro backends
 
@@ -536,9 +536,6 @@ realmente más rápido.
 4. **Registros contra pila `-O2`:** ambos empatan prácticamente en
    `closures` y `quad-loops-big`. La pila optimizada gana en `fib`,
    `string-concat` y, con mucha diferencia, en `arith_globals`.
-5. **`arith_globals`:** la VM de pila `-O2` utiliza accesos globales indexados,
-   mientras que la VM de registros busca los nombres en una tabla hash. Esto
-   explica la diferencia observada en ese programa.
 
 Estos resultados muestran que el modelo de registros puede ser competitivo aun
 sin optimizaciones, pero también que los pases del compilador tienen un efecto
@@ -729,15 +726,52 @@ En la comparación global, `Stack VM -O2 (Release)` fue **~62,9× más rápida**
 ### Interpretación de los resultados
 
 1. **¿Qué cambia técnicamente entre Debug y Release?**
-   * **Modo Debug:** Prioriza la velocidad de compilación y la facilidad de depuración. No realiza *inlining* (cada `push`, `pop` o lectura de byte genera instrucciones `call`/`ret` de CPU), mantiene las variables en memoria RAM e incluye chequeos de seguridad en tiempo de ejecución.
-   * **Modo Release:** LLVM aplica optimizaciones agresivas (`opt-level = 3`): realiza *inlining* de funciones críticas eliminando saltos en la pila de CPU, almacena los valores más consultados directamente en los **registros de hardware** del procesador y elimina chequeos redundantes.
+   * **Modo Debug:** Prioriza la velocidad de compilación y la facilidad de depuración. No realiza *inlining* e incluye chequeos de seguridad en tiempo de ejecución.
+   * **Modo Release:** LLVM aplica optimizaciones agresivas (`opt-level = 3`): puede realizar *inlining* de funciones críticas eliminando saltos en la pila de CPU, almacenar los valores más consultados directamente en los **registros de hardware** del procesador y eliminar chequeos redundantes.
 
 2. **Arquitectura vs. Compilador:**
-   * Un hallazgo llamativo es que **`Stack VM (Debug)` (16,7 ms)** superó a **`Tree-Walk (Release)` (22,5 ms)**.
+   * Algo llamativo es que **`Stack VM (Debug)` (16,7 ms)** superó a **`Tree-Walk (Release)` (22,5 ms)**.
    * Esto demuestra que la eficiencia del modelo de bytecode lineal sobre una pila es tan grande que, aun compilada con todas las trabas del modo debug, superó al intérprete de recorrido de árbol completamente optimizado por LLVM.
 
 3. **Conclusión:**
    * Los resultados confirman la hipótesis: compilar con `--release` acelera la ejecución en ambos backends, demostrando que las optimizaciones del compilador nativo justifican su uso para cualquier medición de rendimiento real.
+
+## Benchmark comparativo de memoria (Peak RSS)
+
+Por sugerencia del docente se midió el pico máximo de memoria física residente (*Maximum Resident Set Size* / Peak RSS) de los cuatro backends de `rlox` frente a `plox` y `ploxb` en Python.
+
+### Metodología
+
+Se utilizó `/usr/bin/time -f "%M KB"` sobre [`rlox/examples/quad-loops.lox`](examples/quad-loops.lox):
+
+```bash
+for cmd in \
+  "./rlox/target/release/rlox" \
+  "./rlox/target/release/rlox --vm -O0" \
+  "./rlox/target/release/rlox --vm -O2" \
+  "./rlox/target/release/rlox --reg" \
+  "plox" \
+  "ploxb"; do
+  printf "%-38s: " "$cmd"
+  /usr/bin/time -f "%M KB  (tiempo: %e s)" $cmd rlox/examples/quad-loops.lox > /dev/null
+done
+```
+
+### Resultados obtenidos
+
+| Implementación | Backend / Tecnología | Pico de Memoria (Peak RSS) | Memoria Relativa | Tiempo de Ejecución |
+| :--- | :--- | ---: | :---: | ---: |
+| **`rlox` (Tree-Walk)** | Rust (Recorrido de AST) | **2.324 KB** (~2,27 MB) | **1,00× (Base)** | 0,02 s |
+| **`rlox` (Register VM)** | Rust (Bytecode de 3 direcciones) | **2.332 KB** (~2,28 MB) | **1,00×** | < 0,01 s |
+| **`rlox` (Stack VM `-O2`)** | Rust (Bytecode de pila optimizado) | **2.340 KB** (~2,28 MB) | **1,01×** | < 0,01 s |
+| **`rlox` (Stack VM `-O0`)** | Rust (Bytecode de pila sin opt.) | **2.436 KB** (~2,38 MB) | 1,05× | < 0,01 s |
+| **`ploxb`** | Python 3 (Bytecode VM) | **29.476 KB** (~28,78 MB) | **~12,68× más memoria** | 0,98 s |
+| **`plox`** | Python 3 (Tree-Walk) | **30.888 KB** (~30,16 MB) | **~13,28× más memoria** | 1,42 s |
+
+### Conclusiones
+
+- **Rust vs. Python (~13× menos memoria):** Todos los backends de `rlox` consumen apenas **~2,3 MB** frente a los **~30 MB** de `plox` y `ploxb`. Esto refleja la ausencia de un runtime pesado y que los primitivos en `rlox` (`f64`, `bool`) no requieren reservas en el heap, a diferencia de los objetos `PyObject` de CPython.
+- **Paridad entre backends de `rlox`:** La memoria entre Tree-Walk, VM de pila y VM de registros es casi idéntica (< 5% de diferencia). La compilación a bytecode lineal no introduce sobrecarga de memoria frente al AST.
 
 ## Limitaciones
 
@@ -833,6 +867,6 @@ print matriz[1][0]; // 3
 
 Para consultar programas completos utilizando listas (como algoritmos de ordenamiento in-place, pilas LIFO y operaciones sobre matrices bidimensionales), véase el directorio `examples/lists/`.
 
-Los tres grupos de funcionalidades adicionales están plenamente implementados y verificados en todos los backends.
+
 
 
