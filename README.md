@@ -316,7 +316,7 @@ El parser transforma las construcciones de alto nivel como los bucles `for` en c
 ### 5. Elección de Rust como lenguaje anfitrión
 * **Seguridad de memoria determinista:** Rust gestiona los recursos mediante pertenencia (*ownership*) y destrucción determinista (RAII), evitando las pausas de un Garbage Collector global. En el Tree-Walk, los entornos de ejecución se modelan mediante conteo de referencias (`Rc<RefCell<Environment>>`), lo cual prescinde de un recolector pero retiene memoria si se acumulan cadenas de clausuras en el heap. En las VMs, en cambio, los valores residen en pilas y registros que se reciclan de forma compacta.
 * **Sistema de tipos expresivo y exhaustivo:** El uso de enumerados (`enum`) y pattern matching exhaustivo obliga al compilador a verificar que todas las variantes de tokens, expresiones, sentencias e instrucciones de bytecode estén contempladas, erradicando estados inválidos en tiempo de ejecución.
-* **Abstracciones de costo cero (*Zero-Cost Abstractions*):** Los patrones de diseño y los iteradores de Rust se compilan a código de máquina plano en modo `--release`, alcanzando un rendimiento cercano a C.
+* **Abstracciones de costo cero (*Zero-Cost Abstractions*):** Los patrones de diseño y los iteradores de Rust se compilan a código de máquina plano en modo `--release`.
 
 ### 6. Pila explícita de estados de función (`Vec<FnState>`) en lugar de árbol de compiladores
 En *Crafting Interpreters*, la compilación de funciones anidadas y closures se modela en C enlazando estructuras `Compiler` mediante punteros crudos (`struct Compiler* enclosing;`), formando una cadena o árbol de compiladores sobre la pila de llamadas del sistema.
@@ -394,7 +394,7 @@ Ninguno de los 14 benchmarks empeoró. Las ganancias son grandes en código arit
 
 #### Interpretación de los gráficos
 
-- **Descenso sostenido (Figura 1):** En todos los casos se observa una reducción escalonada del tiempo: primero por las mejoras de runtime (`-O0`) y luego un salto todavía mayor con los pases del compilador (`-O2`).
+- **Descenso sostenido (Figura 1):** En la mayoría de los casos se observa una reducción escalonada del tiempo: primero por las mejoras de runtime (`-O0`) y luego un salto todavía mayor con los pases del compilador (`-O2`).
 - **Picos en aritmética y bucles (Figura 2):** Los mayores factores de aceleración ocurren en `const_expr` (5,00×) y `loops_nested` (3,56×), donde el *constant folding* y las superinstrucciones eliminan directamente la emisión y despacho de instrucciones repetitivas.
 - **Límite en operaciones de memoria:** En `strings` (1,26×) y `mixed` (1,37×) la aceleración es menor porque el costo principal reside en la reserva y copia de memoria en el heap, cuello de botella que las optimizaciones a nivel bytecode no pueden evitar.
 
@@ -532,7 +532,7 @@ realmente más rápido.
 3. **Efecto de `-O2`:** la VM de pila optimizada es la más rápida en cuatro de
    los cinco programas. La mejora es especialmente grande en
    `quad-loops-big` y `arith_globals`, donde se benefician las superinstrucciones
-   y los globales indexados descritos en la sección siguiente.
+   y los globales indexados descritos en la sección anterior.
 4. **Registros contra pila `-O2`:** ambos empatan prácticamente en
    `closures` y `quad-loops-big`. La pila optimizada gana en `fib`,
    `string-concat` y, con mucha diferencia, en `arith_globals`.
