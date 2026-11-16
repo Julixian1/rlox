@@ -779,7 +779,7 @@ done
 
 - **VMs de `rlox` (~2,5 a 2,7 MB):** No acumulan memoria tras 10.000 closures y bloques, lo que confirma que las variables se desapilan al salir de ámbito y que los *upvalues* se cierran adecuadamente.
 - **Tree-Walk (~10,9 MB):** Consume unas 4 veces más que las VMs. La causa probable son las referencias de `Rc` entre el entorno y la función de cada closure, que retienen memoria en el heap.
-- **`plox` y `ploxb` (~30 MB):** La diferencia frente a `rlox` se debe casi en su totalidad al costo base de arranque del intérprete CPython, por lo que refleja el peso del runtime y no una fuga en el programa.
+- **`plox` y `ploxb` (~30 MB):** La diferencia frente a `rlox` creemos que se debe casi en su totalidad al costo base de arranque del intérprete CPython, por lo que refleja el peso del runtime y no una fuga en el programa.
 
 ## Limitaciones
 
