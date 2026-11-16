@@ -1,0 +1,78 @@
+// inheritance.lox
+// Demuestra herencia simple, sobrescritura de metodos y jerarquias multinivel (3 o mas niveles).
+
+// 1. Herencia simple y metodos heredados
+class Animal {
+  init(name) {
+    this.name = name;
+  }
+
+  breathe() {
+    print this.name + " respira.";
+  }
+}
+
+class Dog < Animal {
+  bark() {
+    print this.name + " ladra: guau!";
+  }
+}
+
+var dog = Dog("Firulais");
+dog.breathe();
+dog.bark();
+
+// 2. Sobrescritura de metodos (override)
+class Bird < Animal {
+  fly() {
+    print this.name + " vuela libremente.";
+  }
+}
+
+class Penguin < Bird {
+  // Sobrescribe fly() con comportamiento adaptado
+  fly() {
+    print this.name + " no puede volar, pero nada habilmente.";
+  }
+}
+
+var sparrow = Bird("Gorrion");
+sparrow.fly();
+
+var penguin = Penguin("Pingu");
+penguin.breathe();
+penguin.fly();
+
+// 3. Herencia multinivel (3 niveles)
+class Vehicle {
+  init(brand) {
+    this.brand = brand;
+  }
+
+  category() {
+    return "Vehiculo general";
+  }
+}
+
+class MotorVehicle < Vehicle {
+  fuel() {
+    return "Combustible generico";
+  }
+}
+
+class ElectricCar < MotorVehicle {
+  category() {
+    return "Automovil electrico " + this.brand;
+  }
+
+  fuel() {
+    return "Bateria electrica";
+  }
+}
+
+var tesla = ElectricCar("Tesla");
+print "--- Herencia multinivel ---";
+print tesla.brand;
+print tesla.category();
+print tesla.fuel();
+

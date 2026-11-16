@@ -1,0 +1,66 @@
+// super.lox
+// Demuestra invocacion de metodos y constructores de la superclase mediante 'super', y su encadenamiento.
+
+class BaseWidget {
+  init(id) {
+    this.id = id;
+  }
+
+  render() {
+    return "Widget(" + this.id + ")";
+  }
+}
+
+class TaggedWidget < BaseWidget {
+  init(id, tag) {
+    super.init(id);
+    this.tag = tag;
+  }
+
+  render() {
+    return "[" + this.tag + "] " + super.render();
+  }
+}
+
+class FramedWidget < TaggedWidget {
+  init(id, tag, border) {
+    super.init(id, tag);
+    this.border = border;
+  }
+
+  render() {
+    return this.border + " " + super.render() + " " + this.border;
+  }
+}
+
+var widget = FramedWidget("42", "PRIMARY", "###");
+print "--- Render con llamadas encadenadas a super ---";
+print widget.render();
+print "--- ID preservado por super.init ---";
+print widget.id;
+
+// Verificacion de que 'this' dentro de metodos llamados con 'super' conserva el receptor original
+class Alpha {
+  whoami() {
+    return this.label();
+  }
+
+  label() {
+    return "Alpha";
+  }
+}
+
+class Beta < Alpha {
+  whoami() {
+    return "Beta delegando en -> " + super.whoami();
+  }
+
+  label() {
+    return "Instancia concreta Beta";
+  }
+}
+
+var b = Beta();
+print "--- Despacho dinamico con super ---";
+print b.whoami();
+

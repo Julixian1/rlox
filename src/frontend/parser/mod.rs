@@ -1,9 +1,17 @@
-use crate::expr::{Expr, LiteralValue};
-use crate::stmt::Stmt;
-use crate::token::{Literal, Token, TokenType};
+//! Analizador sintáctico (Parser) descendente recursivo y combinador con Pratt para expresiones.
 
+use crate::expr::Expr;
+use crate::stmt::Stmt;
+use crate::token::{Token, TokenType};
+
+mod pratt;
+use pratt::Precedence;
+
+/// Analizador sintáctico que procesa una secuencia de tokens y produce el AST correspondiente.
 pub struct Parser {
+    /// Secuencia de tokens de entrada a parsear.
     tokens: Vec<Token>,
+    /// Posición del token actual en la secuencia.
     current: usize,
 }
 
@@ -12,8 +20,6 @@ impl Parser {
     pub fn new(tokens: Vec<Token>) -> Self {
         Parser { tokens, current: 0 }
     }
-
-    // HELPERS
 
     /// Retorna una referencia al token actual sin consumirlo.
     fn peek(&self) -> &Token {
@@ -102,13 +108,16 @@ impl Parser {
             }
 
             match self.peek().token_type {
-                TokenType::Fun
+                TokenType::Class
+                | TokenType::Fun
                 | TokenType::Var
                 | TokenType::For
                 | TokenType::If
                 | TokenType::While
                 | TokenType::Print
-                | TokenType::Return => return,
+                | TokenType::Return
+                | TokenType::Break
+                | TokenType::Continue => return,
                 _ => {}
             }
 
@@ -116,12 +125,13 @@ impl Parser {
         }
     }
 
-    // DECLARATIONS
-
-    /// Parsea una declaración (función, variable o sentencia).
+    /// Parsea una declaración (clase, función, variable o sentencia).
     fn declaration(&mut self) -> Result<Stmt, String> {
+        if self.match_token(&[TokenType::Class]) {
+            return self.class_declaration();
+        }
         if self.match_token(&[TokenType::Fun]) {
-            return self.fun_declaration();
+            return self.function("function");
         }
         if self.match_token(&[TokenType::Var]) {
             return self.var_declaration();
@@ -129,11 +139,51 @@ impl Parser {
         self.statement()
     }
 
-    /// Parsea una declaración de función (`fun nombre(params) { ... }`).
-    fn fun_declaration(&mut self) -> Result<Stmt, String> {
-        let name = self.consume(&TokenType::Identifier, "Expected function name.")?;
+    /// Parsea una declaración de clase (`class nombre < superclase { metodos }`).
+    fn class_declaration(&mut self) -> Result<Stmt, String> {
+        let name = self.consume(&TokenType::Identifier, "Expected class name.")?;
 
-        self.consume(&TokenType::LeftParen, "Expected '(' after function name.")?;
+        let superclass = if self.match_token(&[TokenType::Less]) {
+            let superclass_name =
+                self.consume(&TokenType::Identifier, "Expected superclass name.")?;
+            if superclass_name.lexeme == name.lexeme {
+                return Err(format!(
+                    "[line {}] Error at '{}': A class can't inherit from itself.",
+                    superclass_name.line, superclass_name.lexeme
+                ));
+            }
+            Some(Expr::Variable {
+                name: superclass_name,
+            })
+        } else {
+            None
+        };
+
+        self.consume(&TokenType::LeftBrace, "Expected '{' before class body.")?;
+
+        let mut methods = Vec::new();
+        while !self.check(&TokenType::RightBrace) && !self.is_at_end() {
+            methods.push(self.function("method")?);
+        }
+
+        self.consume(&TokenType::RightBrace, "Expected '}' after class body.")?;
+
+        Ok(Stmt::Class {
+            name,
+            superclass,
+            methods,
+        })
+    }
+
+    /// Parsea una función o un método (`nombre(params) { ... }`). `kind` es
+    /// "function" o "method" y solo cambia el texto de los errores.
+    fn function(&mut self, kind: &str) -> Result<Stmt, String> {
+        let name = self.consume(&TokenType::Identifier, &format!("Expected {kind} name."))?;
+
+        self.consume(
+            &TokenType::LeftParen,
+            &format!("Expected '(' after {kind} name."),
+        )?;
 
         let mut params: Vec<Token> = Vec::new();
         if !self.check(&TokenType::RightParen) {
@@ -154,7 +204,10 @@ impl Parser {
         }
 
         self.consume(&TokenType::RightParen, "Expected ')' after parameters.")?;
-        self.consume(&TokenType::LeftBrace, "Expected '{' before function body.")?;
+        self.consume(
+            &TokenType::LeftBrace,
+            &format!("Expected '{{' before {kind} body."),
+        )?;
 
         let body = std::rc::Rc::new(self.block()?);
 
@@ -179,8 +232,6 @@ impl Parser {
         Ok(Stmt::Var { name, initializer })
     }
 
-    // STATEMENTS
-
     /// Parsea una sentencia según la palabra clave inicial (print, bloque, if, while, for, return o expresión).
     fn statement(&mut self) -> Result<Stmt, String> {
         if self.match_token(&[TokenType::Print]) {
@@ -201,6 +252,12 @@ impl Parser {
         }
         if self.match_token(&[TokenType::Return]) {
             return self.return_statement();
+        }
+        if self.match_token(&[TokenType::Break]) {
+            return self.break_statement();
+        }
+        if self.match_token(&[TokenType::Continue]) {
+            return self.continue_statement();
         }
 
         self.expression_statement()
@@ -267,30 +324,25 @@ impl Parser {
         Ok(Stmt::While { condition, body })
     }
 
-    /// Parsea un bucle `for (init; cond; inc) body` transformándolo (desugaring) en estructuras `While` y `Block`.
+    /// Parsea un bucle `for (init; cond; inc) body`.
     fn for_statement(&mut self) -> Result<Stmt, String> {
         self.consume(&TokenType::LeftParen, "Expected '(' after 'for'.")?;
 
-        // Inicializador
         let initializer = if self.match_token(&[TokenType::Semicolon]) {
             None
         } else if self.match_token(&[TokenType::Var]) {
-            Some(self.var_declaration()?)
+            Some(Box::new(self.var_declaration()?))
         } else {
-            Some(self.expression_statement()?)
+            Some(Box::new(self.expression_statement()?))
         };
 
-        // Condición
         let condition = if !self.check(&TokenType::Semicolon) {
-            self.expression()?
+            Some(self.expression()?)
         } else {
-            Expr::Literal {
-                value: LiteralValue::Bool(true),
-            }
+            None
         };
         self.consume(&TokenType::Semicolon, "Expected ';' after loop condition.")?;
 
-        // Incremento
         let increment = if !self.check(&TokenType::RightParen) {
             Some(self.expression()?)
         } else {
@@ -298,30 +350,28 @@ impl Parser {
         };
         self.consume(&TokenType::RightParen, "Expected ')' after for clauses.")?;
 
-        // Body
-        let mut body = self.statement()?;
+        let body = Box::new(self.statement()?);
 
-        // Desugaring: agregar incremento al final del body
-        if let Some(inc) = increment {
-            body = Stmt::Block {
-                statements: vec![body, Stmt::Expression { expression: inc }],
-            };
-        }
-
-        // Envolver en while
-        body = Stmt::While {
+        Ok(Stmt::For {
+            initializer,
             condition,
-            body: Box::new(body),
-        };
+            increment,
+            body,
+        })
+    }
 
-        // Envolver con inicializador
-        if let Some(init) = initializer {
-            body = Stmt::Block {
-                statements: vec![init, body],
-            };
-        }
+    /// Parsea una sentencia `break;`.
+    fn break_statement(&mut self) -> Result<Stmt, String> {
+        let keyword = self.previous().clone();
+        self.consume(&TokenType::Semicolon, "Expected ';' after 'break'.")?;
+        Ok(Stmt::Break { keyword })
+    }
 
-        Ok(body)
+    /// Parsea una sentencia `continue;`.
+    fn continue_statement(&mut self) -> Result<Stmt, String> {
+        let keyword = self.previous().clone();
+        self.consume(&TokenType::Semicolon, "Expected ';' after 'continue'.")?;
+        Ok(Stmt::Continue { keyword })
     }
 
     /// Parsea una sentencia de retorno (`return expr;`).
@@ -339,174 +389,121 @@ impl Parser {
         Ok(Stmt::Return { keyword, value })
     }
 
-    // EXPRESSIONS (de menor a mayor precedencia)
-
     /// Punto de entrada para parsear expresiones. Delega a `assignment`.
     fn expression(&mut self) -> Result<Expr, String> {
         self.assignment()
     }
 
-    /// Parsea expresiones de asignación (`var = expr`).
+    /// Parsea expresiones de asignación (`var = expr`, `obj.prop = expr`, `var += expr`, etc.).
     fn assignment(&mut self) -> Result<Expr, String> {
-        let expr = self.logic_or()?;
+        let expr = self.parse_precedence(Precedence::Ternary)?;
 
-        if self.match_token(&[TokenType::Equal]) {
+        if self.match_token(&[
+            TokenType::Equal,
+            TokenType::PlusEqual,
+            TokenType::MinusEqual,
+            TokenType::StarEqual,
+            TokenType::SlashEqual,
+            TokenType::PercentEqual,
+        ]) {
+            let operator = self.previous().clone();
             let value = self.assignment()?;
 
-            if let Expr::Variable { name } = expr {
-                return Ok(Expr::Assign {
-                    name,
-                    value: Box::new(value),
-                });
+            if operator.token_type == TokenType::Equal {
+                if let Expr::Variable { name } = expr {
+                    return Ok(Expr::Assign {
+                        name,
+                        value: Box::new(value),
+                    });
+                } else if let Expr::Get { object, name } = expr {
+                    return Ok(Expr::Set {
+                        object,
+                        name,
+                        value: Box::new(value),
+                    });
+                } else if let Expr::IndexGet {
+                    object,
+                    bracket,
+                    index,
+                } = expr
+                {
+                    return Ok(Expr::IndexSet {
+                        object,
+                        bracket,
+                        index,
+                        value: Box::new(value),
+                    });
+                }
+            } else {
+                if let Expr::Variable { name } = expr {
+                    return Ok(Expr::AssignModify {
+                        name,
+                        operator,
+                        value: Box::new(value),
+                    });
+                } else if let Expr::Get { object, name } = expr {
+                    return Ok(Expr::SetModify {
+                        object,
+                        name,
+                        operator,
+                        value: Box::new(value),
+                    });
+                } else if let Expr::IndexGet {
+                    object,
+                    bracket,
+                    index,
+                } = expr
+                {
+                    return Ok(Expr::IndexSetModify {
+                        object,
+                        bracket,
+                        index,
+                        operator,
+                        value: Box::new(value),
+                    });
+                }
             }
 
-            let equals = self.previous().clone();
             return Err(format!(
-                "[line {}] Error at '=': Invalid assignment target.",
-                equals.line
+                "[line {}] Error at '{}': Invalid assignment target.",
+                operator.line, operator.lexeme
             ));
         }
 
         Ok(expr)
     }
 
-    /// Parsea expresiones lógicas `or`.
-    fn logic_or(&mut self) -> Result<Expr, String> {
-        let mut expr = self.logic_and()?;
-
-        while self.match_token(&[TokenType::Or]) {
-            let operator = self.previous().clone();
-            let right = self.logic_and()?;
-            expr = Expr::Logical {
-                left: Box::new(expr),
-                operator,
-                right: Box::new(right),
-            };
-        }
-
-        Ok(expr)
-    }
-
-    /// Parsea expresiones lógicas `and`.
-    fn logic_and(&mut self) -> Result<Expr, String> {
-        let mut expr = self.equality()?;
-
-        while self.match_token(&[TokenType::And]) {
-            let operator = self.previous().clone();
-            let right = self.equality()?;
-            expr = Expr::Logical {
-                left: Box::new(expr),
-                operator,
-                right: Box::new(right),
-            };
-        }
-
-        Ok(expr)
-    }
-
-    /// Parsea operaciones de igualdad y desigualdad (`==`, `!=`).
-    fn equality(&mut self) -> Result<Expr, String> {
-        let mut expr = self.comparison()?;
-
-        while self.match_token(&[TokenType::BangEqual, TokenType::EqualEqual]) {
-            let operator = self.previous().clone();
-            let right = self.comparison()?;
-            expr = Expr::Binary {
-                left: Box::new(expr),
-                operator,
-                right: Box::new(right),
-            };
-        }
-
-        Ok(expr)
-    }
-
-    /// Parsea comparaciones de orden (`>`, `>=`, `<`, `<=`).
-    fn comparison(&mut self) -> Result<Expr, String> {
-        let mut expr = self.term()?;
-
-        while self.match_token(&[
-            TokenType::Greater,
-            TokenType::GreaterEqual,
-            TokenType::Less,
-            TokenType::LessEqual,
-        ]) {
-            let operator = self.previous().clone();
-            let right = self.term()?;
-            expr = Expr::Binary {
-                left: Box::new(expr),
-                operator,
-                right: Box::new(right),
-            };
-        }
-
-        Ok(expr)
-    }
-
-    /// Parsea sumas y restas (`+`, `-`).
-    fn term(&mut self) -> Result<Expr, String> {
-        let mut expr = self.factor()?;
-
-        while self.match_token(&[TokenType::Minus, TokenType::Plus]) {
-            let operator = self.previous().clone();
-            let right = self.factor()?;
-            expr = Expr::Binary {
-                left: Box::new(expr),
-                operator,
-                right: Box::new(right),
-            };
-        }
-
-        Ok(expr)
-    }
-
-    /// Parsea multiplicaciones, divisiones y módulos (`*`, `/`, `%`).
-    fn factor(&mut self) -> Result<Expr, String> {
-        let mut expr = self.unary()?;
-
-        while self.match_token(&[TokenType::Slash, TokenType::Star, TokenType::Percent]) {
-            let operator = self.previous().clone();
-            let right = self.unary()?;
-            expr = Expr::Binary {
-                left: Box::new(expr),
-                operator,
-                right: Box::new(right),
-            };
-        }
-
-        Ok(expr)
-    }
-
-    /// Parsea operadores unarios (`!`, `-`).
-    fn unary(&mut self) -> Result<Expr, String> {
-        if self.match_token(&[TokenType::Bang, TokenType::Minus]) {
-            let operator = self.previous().clone();
-            let right = self.unary()?;
-            return Ok(Expr::Unary {
-                operator,
-                right: Box::new(right),
-            });
-        }
-
-        self.call()
-    }
-
-    /// Parsea llamadas a función (`callee(args...)`).
-    fn call(&mut self) -> Result<Expr, String> {
-        let mut expr = self.primary()?;
-
-        loop {
-            if self.match_token(&[TokenType::LeftParen]) {
-                expr = self.finish_call(expr)?;
-            } else {
-                break;
+    /// Parsea un literal de lista `[elem1, elem2, ...]`.
+    pub(super) fn list_literal(&mut self) -> Result<Expr, String> {
+        let bracket = self.previous().clone();
+        let mut elements = Vec::new();
+        if !self.check(&TokenType::RightBracket) {
+            elements.push(self.expression()?);
+            while self.match_token(&[TokenType::Comma]) {
+                elements.push(self.expression()?);
             }
         }
-
-        Ok(expr)
+        self.consume(
+            &TokenType::RightBracket,
+            "Expected ']' after list elements.",
+        )?;
+        Ok(Expr::List { bracket, elements })
     }
 
-    /// Auxiliar para parsear la lista de argumentos de una llamada a función.
+    /// Parsea la indexación `object[index]`.
+    pub(super) fn finish_index(&mut self, object: Expr) -> Result<Expr, String> {
+        let bracket = self.previous().clone();
+        let index = self.expression()?;
+        self.consume(&TokenType::RightBracket, "Expected ']' after index.")?;
+        Ok(Expr::IndexGet {
+            object: Box::new(object),
+            bracket,
+            index: Box::new(index),
+        })
+    }
+
+    /// Parsea la lista de argumentos de una llamada a función.
+    /// Es la función infix de `(` en la tabla de Pratt: el `(` ya fue consumido.
     fn finish_call(&mut self, callee: Expr) -> Result<Expr, String> {
         let mut arguments: Vec<Expr> = Vec::new();
 
@@ -534,74 +531,5 @@ impl Parser {
             paren,
             arguments,
         })
-    }
-
-    /// Parsea expresiones primarias: literales (booleanos, números, cadenas, nil), identificadores de variables o paréntesis.
-    fn primary(&mut self) -> Result<Expr, String> {
-        // Literales booleanos y nil
-        if self.match_token(&[TokenType::False]) {
-            return Ok(Expr::Literal {
-                value: LiteralValue::Bool(false),
-            });
-        }
-        if self.match_token(&[TokenType::True]) {
-            return Ok(Expr::Literal {
-                value: LiteralValue::Bool(true),
-            });
-        }
-        if self.match_token(&[TokenType::Nil]) {
-            return Ok(Expr::Literal {
-                value: LiteralValue::Nil,
-            });
-        }
-
-        // Literales numéricos y strings
-        if self.match_token(&[TokenType::Number]) {
-            let token = self.previous().clone();
-            if let Some(Literal::Number(n)) = token.literal {
-                return Ok(Expr::Literal {
-                    value: LiteralValue::Number(n),
-                });
-            }
-            return Err(format!(
-                "[line {}] Error: Invalid number literal.",
-                token.line
-            ));
-        }
-        if self.match_token(&[TokenType::String]) {
-            let token = self.previous().clone();
-            if let Some(Literal::String(s)) = token.literal {
-                return Ok(Expr::Literal {
-                    value: LiteralValue::StringVal(s),
-                });
-            }
-            return Err(format!(
-                "[line {}] Error: Invalid string literal.",
-                token.line
-            ));
-        }
-
-        // Identificadores
-        if self.match_token(&[TokenType::Identifier]) {
-            return Ok(Expr::Variable {
-                name: self.previous().clone(),
-            });
-        }
-
-        // Agrupamiento
-        if self.match_token(&[TokenType::LeftParen]) {
-            let expr = self.expression()?;
-            self.consume(&TokenType::RightParen, "Expected ')' after expression.")?;
-            return Ok(Expr::Grouping {
-                expression: Box::new(expr),
-            });
-        }
-
-        // Error: token inesperado
-        let token = self.peek().clone();
-        Err(format!(
-            "[line {}] Error at '{}': Expected expression.",
-            token.line, token.lexeme
-        ))
     }
 }

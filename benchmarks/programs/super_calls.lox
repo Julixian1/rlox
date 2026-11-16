@@ -1,0 +1,24 @@
+class Base {
+  calc(x) {
+    return x + 1;
+  }
+}
+
+class Derived < Base {
+  calc(x) {
+    return super.calc(x);
+  }
+}
+
+fun main() {
+  var d = Derived();
+  var i = 0;
+  var acc = 0;
+  while (i < 1000000) {
+    acc = d.calc(acc);
+    i = i + 1;
+  }
+  print acc;
+}
+main();
+

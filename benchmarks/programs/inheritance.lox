@@ -1,0 +1,36 @@
+class A {
+  init(v) {
+    this.v = v;
+  }
+  get() {
+    return this.v;
+  }
+}
+
+class B < A {
+  init(v) {
+    super.init(v);
+  }
+  get() {
+    return super.get() + 1;
+  }
+}
+
+class C < B {
+  get() {
+    return super.get() + 1;
+  }
+}
+
+fun main() {
+  var i = 0;
+  var acc = 0;
+  while (i < 200000) {
+    var c = C(i);
+    acc = acc + c.get();
+    i = i + 1;
+  }
+  print acc;
+}
+main();
+

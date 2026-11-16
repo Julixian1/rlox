@@ -1,0 +1,26 @@
+class Point {
+  init(x, y) {
+    this.x = x;
+    this.y = y;
+  }
+  sum() {
+    return this.x + this.y;
+  }
+  move(dx) {
+    this.x = this.x + dx;
+  }
+}
+
+fun main() {
+  var p = Point(1, 2);
+  var i = 0;
+  var acc = 0;
+  while (i < 1000000) {
+    p.move(1);
+    acc = acc + p.sum();
+    i = i + 1;
+  }
+  print acc;
+}
+main();
+

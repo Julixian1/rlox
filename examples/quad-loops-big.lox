@@ -1,0 +1,12 @@
+// Igual que quad-loops.lox pero 100 veces más grande (10.000.000 de iteraciones internas),
+// para que el tiempo de arranque del proceso no tape la diferencia entre backends.
+
+var i = 0;
+while (i < 10000) {
+    var j = 0;
+    while (j < 1000) {
+        j = j + 1;
+    }
+    i = i + 1;
+}
+print i;

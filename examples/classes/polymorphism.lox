@@ -1,0 +1,63 @@
+// polymorphism.lox
+// Demuestra polimorfismo, metodos ligados (bound methods) como valores y closures que capturan 'this'.
+
+// 1. Polimorfismo y despacho dinamico
+class Shape {
+  name() { return "Forma"; }
+  area() { return 0; }
+}
+
+class Circle < Shape {
+  init(radius) {
+    this.radius = radius;
+  }
+  name() { return "Circulo"; }
+  area() { return 3.14159 * this.radius * this.radius; }
+}
+
+class Square < Shape {
+  init(side) {
+    this.side = side;
+  }
+  name() { return "Cuadrado"; }
+  area() { return this.side * this.side; }
+}
+
+fun print_shape_info(shape) {
+  print shape.name() + " -> area:";
+  print shape.area();
+}
+
+print "--- Despacho polimorfico ---";
+print_shape_info(Circle(2));
+print_shape_info(Square(5));
+
+// 2. Metodos ligados (bound methods) extraidos a variables
+var sq = Square(4);
+var get_area = sq.area;
+print "--- Metodo ligado invocado independientemente ---";
+print get_area();
+
+// 3. Closures que capturan 'this'
+class Accumulator {
+  init(base) {
+    this.total = base;
+  }
+
+  make_adder() {
+    fun add(n) {
+      this.total = this.total + n;
+      return this.total;
+    }
+    return add;
+  }
+}
+
+var acc = Accumulator(100);
+var adder = acc.make_adder();
+
+print "--- Closure capturando 'this' ---";
+print adder(10);
+print adder(25);
+print acc.total;
+

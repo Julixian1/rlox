@@ -1,0 +1,7 @@
+benchmark,backend,opt_level,opt_passes,reps,warmup,front_med_ms,front_iqr_ms,comp_med_ms,comp_iqr_ms,vm_med_ms,vm_iqr_ms,total_med_ms,total_iqr_ms,instructions,constants,approx_bytes,status
+calls,vm,O0,none,10,3,0.0394,0.0066,0.0100,0.0013,184.7310,11.4090,184.7903,11.4161,39,9,684,"ok"
+closures,vm,O0,none,10,3,0.0449,0.0128,0.0103,0.0013,159.1078,12.6085,159.1721,12.6259,47,11,828,"ok"
+recursion,vm,O0,none,10,3,0.0314,0.0028,0.0083,0.0011,93.9013,4.3561,93.9652,4.3573,31,7,540,"ok"
+methods,vm,O0,none,10,3,0.0549,0.0078,0.0158,0.0020,692.6512,31.3461,692.7261,31.3137,79,24,1524,"ok"
+inheritance,vm,O0,none,10,3,0.0859,0.0342,0.0171,0.0053,261.6347,83.7391,261.7654,83.8388,102,25,1824,"ok"
+mixed,vm,O0,none,10,3,0.1355,0.0289,0.0184,0.0034,190.2639,12.9359,190.4201,12.9886,123,29,2172,"ok"

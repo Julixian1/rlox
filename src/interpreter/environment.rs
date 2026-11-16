@@ -1,3 +1,5 @@
+//! Gestión de entornos léxicos encadenados (scopes) para el intérprete Tree-Walk.
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -5,9 +7,12 @@ use std::rc::Rc;
 use crate::token::Token;
 use crate::value::Value;
 
+/// Entorno léxico que almacena asociaciones entre nombres de variables y sus valores en ejecución.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Environment {
+    /// Tabla de símbolos que vincula identificadores con sus valores en el ámbito actual.
     values: HashMap<String, Value>,
+    /// Referencia al entorno envolvente padre (si no es el entorno global raíz).
     pub enclosing: Option<Rc<RefCell<Environment>>>,
 }
 

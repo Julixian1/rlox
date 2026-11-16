@@ -1,0 +1,391 @@
+//! Resolución de variables y cálculo de distancias léxicas para el intérprete Tree-Walk.
+
+use std::collections::{HashMap, HashSet};
+
+use crate::expr::{Expr, ExprVisitor, LiteralValue};
+use crate::stmt::{Stmt, StmtVisitor};
+use crate::token::Token;
+
+/// Estado contextual de clase durante la resolución estática de nombres.
+#[derive(Copy, Clone, PartialEq)]
+enum ClassType {
+    /// Fuera de cualquier clase.
+    None,
+    /// Dentro de una clase sin superclase.
+    Class,
+    /// Dentro de una subclase con superclase declarada.
+    Subclass,
+}
+
+/// Resolvedor de variables que asocia cada expresión con la cantidad de saltos de entorno hasta su declaración.
+pub struct Resolver {
+    /// Pila de ámbitos léxicos que contienen los identificadores locales declarados.
+    scopes: Vec<HashSet<String>>,
+    /// Mapa que vincula el puntero de un nodo `Expr` con su distancia léxica en la cadena de ámbitos.
+    pub locals: HashMap<*const Expr, usize>,
+    /// Tipo de clase actual en resolución para validar accesos a `this` y `super`.
+    current_class: ClassType,
+}
+
+impl Resolver {
+    /// Crea una nueva instancia de `Resolver`.
+    pub fn new() -> Self {
+        Resolver {
+            scopes: Vec::new(),
+            locals: HashMap::new(),
+            current_class: ClassType::None,
+        }
+    }
+
+    /// Abre un nuevo ámbito léxico de variables.
+    fn begin_scope(&mut self) {
+        self.scopes.push(HashSet::new());
+    }
+
+    /// Cierra el ámbito léxico de variables más interno.
+    fn end_scope(&mut self) {
+        self.scopes.pop();
+    }
+
+    /// Registra la declaración de una variable en el ámbito local actual.
+    fn declare(&mut self, name: &Token) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.lexeme.clone());
+        }
+    }
+
+    /// Resuelve la distancia léxica de una variable buscando desde el ámbito más interno hacia el exterior.
+    fn resolve_local(&mut self, expr_ptr: *const Expr, name: &Token) {
+        for (i, scope) in self.scopes.iter().rev().enumerate() {
+            if scope.contains(&name.lexeme) {
+                self.locals.insert(expr_ptr, i);
+                return;
+            }
+        }
+    }
+
+    /// Resuelve los parámetros y el cuerpo de una función dentro de un nuevo ámbito léxico.
+    fn resolve_function(&mut self, params: &[Token], body: &[Stmt]) {
+        self.begin_scope();
+        for param in params {
+            self.declare(param);
+        }
+        self.resolve_stmts(body);
+        self.end_scope();
+    }
+
+    /// Resuelve una secuencia de sentencias del programa.
+    pub fn resolve_stmts(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            self.resolve_stmt(stmt);
+        }
+    }
+
+    /// Despacha la resolución de una sentencia individual mediante el patrón Visitor.
+    fn resolve_stmt(&mut self, stmt: &Stmt) {
+        stmt.accept(self);
+    }
+
+    /// Resuelve recursivamente las variables y subexpresiones de un nodo de expresión.
+    pub fn resolve_expr(&mut self, expr: &Expr) {
+        let ptr = expr as *const Expr;
+        match expr {
+            Expr::Variable { name } => {
+                self.resolve_local(ptr, name);
+            }
+            Expr::Assign { name, value } => {
+                self.resolve_expr(value);
+                self.resolve_local(ptr, name);
+            }
+            Expr::AssignModify { name, value, .. } => {
+                self.resolve_expr(value);
+                self.resolve_local(ptr, name);
+            }
+            Expr::Binary { left, right, .. } => {
+                self.resolve_expr(left);
+                self.resolve_expr(right);
+            }
+            Expr::Call {
+                callee, arguments, ..
+            } => {
+                self.resolve_expr(callee);
+                for arg in arguments {
+                    self.resolve_expr(arg);
+                }
+            }
+            Expr::Grouping { expression } => {
+                self.resolve_expr(expression);
+            }
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                self.resolve_expr(condition);
+                self.resolve_expr(then_branch);
+                self.resolve_expr(else_branch);
+            }
+            Expr::Literal { .. } => {}
+            Expr::Logical { left, right, .. } => {
+                self.resolve_expr(left);
+                self.resolve_expr(right);
+            }
+            Expr::Unary { right, .. } => {
+                self.resolve_expr(right);
+            }
+            Expr::Get { object, .. } => {
+                self.resolve_expr(object);
+            }
+            Expr::Set { object, value, .. } | Expr::SetModify { object, value, .. } => {
+                self.resolve_expr(value);
+                self.resolve_expr(object);
+            }
+            Expr::List { elements, .. } => {
+                for element in elements {
+                    self.resolve_expr(element);
+                }
+            }
+            Expr::IndexGet { object, index, .. } => {
+                self.resolve_expr(object);
+                self.resolve_expr(index);
+            }
+            Expr::IndexSet {
+                object,
+                index,
+                value,
+                ..
+            }
+            | Expr::IndexSetModify {
+                object,
+                index,
+                value,
+                ..
+            } => {
+                self.resolve_expr(value);
+                self.resolve_expr(object);
+                self.resolve_expr(index);
+            }
+            Expr::This { keyword } => {
+                self.resolve_local(ptr, keyword);
+            }
+            Expr::Super { keyword, .. } => {
+                self.resolve_local(ptr, keyword);
+            }
+        }
+    }
+}
+
+impl StmtVisitor<()> for Resolver {
+    fn visit_block_stmt(&mut self, statements: &[Stmt]) {
+        self.begin_scope();
+        self.resolve_stmts(statements);
+        self.end_scope();
+    }
+
+    fn visit_var_stmt(&mut self, name: &Token, initializer: &Option<Expr>) {
+        self.declare(name);
+        if let Some(init) = initializer {
+            self.resolve_expr(init);
+        }
+    }
+
+    fn visit_function_stmt(
+        &mut self,
+        name: &Token,
+        params: &[Token],
+        body: &std::rc::Rc<Vec<Stmt>>,
+    ) {
+        self.declare(name);
+        self.resolve_function(params, body);
+    }
+
+    fn visit_expression_stmt(&mut self, expression: &Expr) {
+        self.resolve_expr(expression);
+    }
+
+    fn visit_if_stmt(
+        &mut self,
+        condition: &Expr,
+        then_branch: &Stmt,
+        else_branch: &Option<Box<Stmt>>,
+    ) {
+        self.resolve_expr(condition);
+        self.resolve_stmt(then_branch);
+        if let Some(else_stmt) = else_branch {
+            self.resolve_stmt(else_stmt);
+        }
+    }
+
+    fn visit_print_stmt(&mut self, expression: &Expr) {
+        self.resolve_expr(expression);
+    }
+
+    fn visit_return_stmt(&mut self, _keyword: &Token, value: &Option<Expr>) {
+        if let Some(expr) = value {
+            self.resolve_expr(expr);
+        }
+    }
+
+    fn visit_while_stmt(&mut self, condition: &Expr, body: &Stmt) {
+        self.resolve_expr(condition);
+        self.resolve_stmt(body);
+    }
+
+    fn visit_break_stmt(&mut self, _keyword: &Token) {}
+
+    fn visit_continue_stmt(&mut self, _keyword: &Token) {}
+
+    fn visit_for_stmt(
+        &mut self,
+        initializer: &Option<Box<Stmt>>,
+        condition: &Option<Expr>,
+        increment: &Option<Expr>,
+        body: &Stmt,
+    ) {
+        self.begin_scope();
+        if let Some(init) = initializer {
+            self.resolve_stmt(init);
+        }
+        if let Some(cond) = condition {
+            self.resolve_expr(cond);
+        }
+        if let Some(inc) = increment {
+            self.resolve_expr(inc);
+        }
+        self.resolve_stmt(body);
+        self.end_scope();
+    }
+
+    fn visit_class_stmt(&mut self, name: &Token, superclass: &Option<Expr>, methods: &[Stmt]) {
+        let enclosing_class = self.current_class;
+        self.current_class = ClassType::Class;
+
+        self.declare(name);
+
+        if let Some(super_expr) = superclass {
+            self.current_class = ClassType::Subclass;
+            self.resolve_expr(super_expr);
+
+            self.begin_scope();
+            self.scopes.last_mut().unwrap().insert("super".to_string());
+        }
+
+        self.begin_scope();
+        self.scopes.last_mut().unwrap().insert("this".to_string());
+
+        for method in methods {
+            if let Stmt::Function { params, body, .. } = method {
+                self.resolve_function(params, body);
+            }
+        }
+
+        self.end_scope();
+
+        if superclass.is_some() {
+            self.end_scope();
+        }
+
+        self.current_class = enclosing_class;
+    }
+}
+
+impl ExprVisitor<()> for Resolver {
+    fn visit_literal_expr(&mut self, _value: &LiteralValue) {}
+    fn visit_unary_expr(&mut self, _operator: &Token, right: &Expr) {
+        self.resolve_expr(right);
+    }
+    fn visit_binary_expr(&mut self, left: &Expr, _operator: &Token, right: &Expr) {
+        self.resolve_expr(left);
+        self.resolve_expr(right);
+    }
+    fn visit_grouping_expr(&mut self, expression: &Expr) {
+        self.resolve_expr(expression);
+    }
+    fn visit_variable_expr(&mut self, _name: &Token) {}
+    fn visit_assign_expr(&mut self, _name: &Token, value: &Expr) {
+        self.resolve_expr(value);
+    }
+    fn visit_assign_modify_expr(&mut self, _name: &Token, _operator: &Token, value: &Expr) {
+        self.resolve_expr(value);
+    }
+    fn visit_logical_expr(&mut self, left: &Expr, _operator: &Token, right: &Expr) {
+        self.resolve_expr(left);
+        self.resolve_expr(right);
+    }
+    fn visit_call_expr(&mut self, callee: &Expr, _paren: &Token, arguments: &[Expr]) {
+        self.resolve_expr(callee);
+        for arg in arguments {
+            self.resolve_expr(arg);
+        }
+    }
+
+    fn visit_get_expr(&mut self, object: &Expr, _name: &Token) {
+        self.resolve_expr(object);
+    }
+
+    fn visit_set_expr(&mut self, object: &Expr, _name: &Token, value: &Expr) {
+        self.resolve_expr(value);
+        self.resolve_expr(object);
+    }
+
+    fn visit_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        _name: &Token,
+        _operator: &Token,
+        value: &Expr,
+    ) {
+        self.resolve_expr(value);
+        self.resolve_expr(object);
+    }
+
+    fn visit_this_expr(&mut self, expr: &Expr, keyword: &Token) {
+        self.resolve_local(expr as *const Expr, keyword);
+    }
+
+    fn visit_super_expr(&mut self, expr: &Expr, keyword: &Token, _method: &Token) {
+        self.resolve_local(expr as *const Expr, keyword);
+    }
+
+    fn visit_ternary_expr(&mut self, condition: &Expr, then_branch: &Expr, else_branch: &Expr) {
+        self.resolve_expr(condition);
+        self.resolve_expr(then_branch);
+        self.resolve_expr(else_branch);
+    }
+
+    fn visit_list_expr(&mut self, _bracket: &Token, elements: &[Expr]) {
+        for el in elements {
+            self.resolve_expr(el);
+        }
+    }
+
+    fn visit_index_get_expr(&mut self, object: &Expr, _bracket: &Token, index: &Expr) {
+        self.resolve_expr(object);
+        self.resolve_expr(index);
+    }
+
+    fn visit_index_set_expr(
+        &mut self,
+        object: &Expr,
+        _bracket: &Token,
+        index: &Expr,
+        value: &Expr,
+    ) {
+        self.resolve_expr(value);
+        self.resolve_expr(object);
+        self.resolve_expr(index);
+    }
+
+    fn visit_index_set_modify_expr(
+        &mut self,
+        object: &Expr,
+        _bracket: &Token,
+        index: &Expr,
+        _operator: &Token,
+        value: &Expr,
+    ) {
+        self.resolve_expr(value);
+        self.resolve_expr(object);
+        self.resolve_expr(index);
+    }
+}

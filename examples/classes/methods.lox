@@ -1,0 +1,87 @@
+// methods.lox
+// Demuestra definicion de metodos, acceso al receptor con 'this', inicializadores ('init') y mutacion de estado.
+
+// 1. Inicializador y metodos con 'this'
+class Rectangle {
+  init(width, height) {
+    this.width = width;
+    this.height = height;
+  }
+
+  area() {
+    return this.width * this.height;
+  }
+
+  perimeter() {
+    return 2 * (this.width + this.height);
+  }
+
+  scale(factor) {
+    this.width = this.width * factor;
+    this.height = this.height * factor;
+  }
+
+  describe() {
+    print "Dimensiones:";
+    print this.width;
+    print this.height;
+    print "Area:";
+    print this.area();
+    print "Perimetro:";
+    print this.perimeter();
+  }
+}
+
+var rect = Rectangle(5, 10);
+rect.describe();
+
+// Mutacion de estado mediante metodos
+rect.scale(2);
+print "--- Despues de escalar x2 ---";
+rect.describe();
+
+// 2. Inicializador con retorno temprano vacio (return;)
+class BankAccount {
+  init(owner, initial_balance) {
+    this.owner = owner;
+    this.balance = initial_balance;
+    if (initial_balance < 0) {
+      this.status = "invalido";
+      return;
+    }
+    this.status = "activo";
+  }
+
+  deposit(amount) {
+    if (amount > 0) {
+      this.balance = this.balance + amount;
+    }
+    return this.balance;
+  }
+
+  withdraw(amount) {
+    if (amount > this.balance) {
+      print "Fondos insuficientes para " + this.owner;
+      return false;
+    }
+    this.balance = this.balance - amount;
+    return true;
+  }
+}
+
+print "--- Cuenta bancaria y retorno temprano en init ---";
+var bad_acc = BankAccount("Cuenta Mala", -50);
+print bad_acc.status;
+
+var acc = BankAccount("Cuenta A", 100);
+print acc.status;
+acc.deposit(50);
+acc.withdraw(30);
+acc.withdraw(200);
+print acc.balance;
+
+// 3. Invocacion explicita de init devuelve la instancia
+var reinited = acc.init("Cuenta A Renovada", 500);
+print reinited.owner;
+print reinited.balance;
+
