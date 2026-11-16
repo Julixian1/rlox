@@ -456,17 +456,17 @@ impl Compiler {
         if let (Value::Number(a), Value::Number(b)) = (&l, &r) {
             let (a, b) = (*a, *b);
             return match op {
-                TokenType::Plus         => Some(Value::Number(a + b)),
-                TokenType::Minus        => Some(Value::Number(a - b)),
-                TokenType::Star         => Some(Value::Number(a * b)),
-                TokenType::Slash        => Some(Value::Number(a / b)),
-                TokenType::Percent      => Some(Value::Number(a % b)),
-                TokenType::Less         => Some(Value::Boolean(a < b)),
-                TokenType::LessEqual    => Some(Value::Boolean(a <= b)),
-                TokenType::Greater      => Some(Value::Boolean(a > b)),
+                TokenType::Plus => Some(Value::Number(a + b)),
+                TokenType::Minus => Some(Value::Number(a - b)),
+                TokenType::Star => Some(Value::Number(a * b)),
+                TokenType::Slash => Some(Value::Number(a / b)),
+                TokenType::Percent => Some(Value::Number(a % b)),
+                TokenType::Less => Some(Value::Boolean(a < b)),
+                TokenType::LessEqual => Some(Value::Boolean(a <= b)),
+                TokenType::Greater => Some(Value::Boolean(a > b)),
                 TokenType::GreaterEqual => Some(Value::Boolean(a >= b)),
-                TokenType::EqualEqual   => Some(Value::Boolean(a == b)),
-                TokenType::BangEqual    => Some(Value::Boolean(a != b)),
+                TokenType::EqualEqual => Some(Value::Boolean(a == b)),
+                TokenType::BangEqual => Some(Value::Boolean(a != b)),
                 _ => None,
             };
         }
@@ -474,7 +474,7 @@ impl Compiler {
         // Igualdad polimórfica sobre otros literales seguros
         match op {
             TokenType::EqualEqual => const_equal(&l, &r).map(Value::Boolean),
-            TokenType::BangEqual  => const_equal(&l, &r).map(|eq| Value::Boolean(!eq)),
+            TokenType::BangEqual => const_equal(&l, &r).map(|eq| Value::Boolean(!eq)),
             _ => None,
         }
     }
@@ -545,9 +545,9 @@ fn is_safe_literal(val: &Value) -> bool {
 /// Los números son manejados por separado en `try_eval_binary`.
 fn const_equal(l: &Value, r: &Value) -> Option<bool> {
     match (l, r) {
-        (Value::String(a),  Value::String(b))  => Some(a == b),
+        (Value::String(a), Value::String(b)) => Some(a == b),
         (Value::Boolean(a), Value::Boolean(b)) => Some(a == b),
-        (Value::Nil,        Value::Nil)         => Some(true),
+        (Value::Nil, Value::Nil) => Some(true),
         _ if is_safe_literal(l) && is_safe_literal(r) => Some(false),
         _ => None,
     }
@@ -657,17 +657,17 @@ impl Compiler {
     /// `BangEqual` se implementa como `Equal` seguido de `Not`.
     fn emit_binary_op(&mut self, operator: &Token) -> CResult {
         let (op, negate) = match operator.token_type {
-            TokenType::Plus         => (OpCode::Add,          false),
-            TokenType::Minus        => (OpCode::Subtract,     false),
-            TokenType::Star         => (OpCode::Multiply,     false),
-            TokenType::Slash        => (OpCode::Divide,       false),
-            TokenType::Percent      => (OpCode::Modulo,       false),
-            TokenType::EqualEqual   => (OpCode::Equal,        false),
-            TokenType::BangEqual    => (OpCode::Equal,        true),
-            TokenType::Greater      => (OpCode::Greater,      false),
+            TokenType::Plus => (OpCode::Add, false),
+            TokenType::Minus => (OpCode::Subtract, false),
+            TokenType::Star => (OpCode::Multiply, false),
+            TokenType::Slash => (OpCode::Divide, false),
+            TokenType::Percent => (OpCode::Modulo, false),
+            TokenType::EqualEqual => (OpCode::Equal, false),
+            TokenType::BangEqual => (OpCode::Equal, true),
+            TokenType::Greater => (OpCode::Greater, false),
             TokenType::GreaterEqual => (OpCode::GreaterEqual, false),
-            TokenType::Less         => (OpCode::Less,         false),
-            TokenType::LessEqual    => (OpCode::LessEqual,    false),
+            TokenType::Less => (OpCode::Less, false),
+            TokenType::LessEqual => (OpCode::LessEqual, false),
             _ => {
                 return Err(self.error(&format!(
                     "Unexpected binary operator '{}'.",
