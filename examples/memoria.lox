@@ -1,0 +1,41 @@
+var N = 10000;
+
+fun hacer(i) {
+  var x = i;
+  fun get() { return x; }
+  return get;
+}
+
+var suma = 0;
+for (var i = 0; i < N; i = i + 1) {
+  var f = hacer(i);
+  suma = suma + f();
+}
+print suma;
+
+var total = 0;
+for (var i = 0; i < N; i = i + 1) {
+  {
+    var s = "0123456789";
+    s = s + s;
+    s = s + s;
+    s = s + s;
+    s = s + s;
+    s = s + "x";
+    total = total + 1;
+  }
+}
+print total;
+
+
+fun bajar(n) {
+  if (n == 0) return 0;
+  return 1 + bajar(n - 1);
+}
+
+var prof = 0;
+for (var i = 0; i < 100; i = i + 1) {
+  prof = prof + bajar(1000);
+}
+print prof;
+

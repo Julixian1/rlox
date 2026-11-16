@@ -19,8 +19,8 @@ backend funcional y como referencia para comprobar la semántica de la VM.
 archivo o REPL
     -> Scanner
     -> Parser
-    -> Checker
     -> AST
+         ├── Checker (análisis semántico y validaciones)
          ├── Resolver -> Interpreter (tree-walk)
          ├── Compiler -> bytecode -> Stack VM
          └── Codegen  -> bytecode -> Register VM
@@ -127,9 +127,9 @@ del bytecode. También sirve como alternativa para estudiar qué operaciones son
 costosas en la VM de pila.
 
 La VM de registros comparte el frontend, pero tiene su propio chunk, codegen,
-closures y runtime. Todavía no soporta todas las construcciones orientadas a
-objetos, por lo que programas con clases pueden aparecer como
-`unsupported`.
+closures y runtime. Todavía no soporta clases ni herencia (programación orientada
+a objetos), por lo que programas con clases son rechazados en tiempo de
+compilación.
 
 Se ejecuta con:
 
@@ -314,7 +314,7 @@ Los nodos `Expr` y `Stmt` contienen exclusivamente datos sintácticos estructura
 El parser transforma las construcciones de alto nivel como los bucles `for` en combinaciones equivalentes de bloques y bucles `while`. De este modo, los backends de ejecución (tanto el Tree-Walk como las máquinas virtuales) solo necesitan implementar una primitiva de bucle, reduciendo la superficie de código y simplificando las optimizaciones.
 
 ### 5. Elección de Rust como lenguaje anfitrión
-* **Seguridad de memoria sin Garbage Collector:** Rust garantiza memory safety mediante las reglas de ownership y borrado determinista en tiempo de compilación (RAII), eliminando pausas de GC y asegurando un consumo mínimo de memoria RAM.
+* **Seguridad de memoria determinista:** Rust gestiona los recursos mediante pertenencia (*ownership*) y destrucción determinista (RAII), evitando las pausas de un Garbage Collector global. En el Tree-Walk, los entornos de ejecución se modelan mediante conteo de referencias (`Rc<RefCell<Environment>>`), lo cual prescinde de un recolector pero retiene memoria si se acumulan cadenas de clausuras en el heap. En las VMs, en cambio, los valores residen en pilas y registros que se reciclan de forma compacta.
 * **Sistema de tipos expresivo y exhaustivo:** El uso de enumerados (`enum`) y pattern matching exhaustivo obliga al compilador a verificar que todas las variantes de tokens, expresiones, sentencias e instrucciones de bytecode estén contempladas, erradicando estados inválidos en tiempo de ejecución.
 * **Abstracciones de costo cero (*Zero-Cost Abstractions*):** Los patrones de diseño y los iteradores de Rust se compilan a código de máquina plano en modo `--release`, alcanzando un rendimiento cercano a C.
 
@@ -738,11 +738,16 @@ En la comparación global, `Stack VM -O2 (Release)` fue **~62,9× más rápida**
 
 ## Benchmark comparativo de memoria (Peak RSS)
 
-Por sugerencia del docente se midió el pico máximo de memoria física residente (*Maximum Resident Set Size* / Peak RSS) de los cuatro backends de `rlox` frente a `plox` y `ploxb` en Python.
+Por sugerencia del docente, se diseñó este benchmark para responder a una pregunta de arquitectura: **¿los scopes y las funciones retienen variables en memoria o no?**
+
+Para evaluarlo, se construyó el programa [`examples/memoria.lox`](examples/memoria.lox), que ejercita tres fases con potencial de acumular memoria dinámica:
+1. **Creación y descarte masivo de closures (10.000 iteraciones)**
+2. **Apertura y cierre de bloques de ámbito (*scopes*)**
+3. **Recursión profunda**
 
 ### Metodología
 
-Se utilizó `/usr/bin/time -f "%M KB"` sobre [`rlox/examples/quad-loops.lox`](examples/quad-loops.lox):
+Se ejecutó con `/usr/bin/time -f "%M KB"` comparando los cuatro backends de `rlox` (compilados con `--release`) frente a `plox` y `ploxb` (rama `fns-and-closures`):
 
 ```bash
 for cmd in \
@@ -753,7 +758,7 @@ for cmd in \
   "plox" \
   "ploxb"; do
   printf "%-38s: " "$cmd"
-  /usr/bin/time -f "%M KB  (tiempo: %e s)" $cmd rlox/examples/quad-loops.lox > /dev/null
+  /usr/bin/time -f "%M KB  (tiempo: %e s)" $cmd rlox/examples/memoria.lox > /dev/null
 done
 ```
 
@@ -761,17 +766,20 @@ done
 
 | Implementación | Backend / Tecnología | Pico de Memoria (Peak RSS) | Memoria Relativa | Tiempo de Ejecución |
 | :--- | :--- | ---: | :---: | ---: |
-| **`rlox` (Tree-Walk)** | Rust (Recorrido de AST) | **2.324 KB** (~2,27 MB) | **1,00× (Base)** | 0,02 s |
-| **`rlox` (Register VM)** | Rust (Bytecode de 3 direcciones) | **2.332 KB** (~2,28 MB) | **1,00×** | < 0,01 s |
-| **`rlox` (Stack VM `-O2`)** | Rust (Bytecode de pila optimizado) | **2.340 KB** (~2,28 MB) | **1,01×** | < 0,01 s |
-| **`rlox` (Stack VM `-O0`)** | Rust (Bytecode de pila sin opt.) | **2.436 KB** (~2,38 MB) | 1,05× | < 0,01 s |
-| **`ploxb`** | Python 3 (Bytecode VM) | **29.476 KB** (~28,78 MB) | **~12,68× más memoria** | 0,98 s |
-| **`plox`** | Python 3 (Tree-Walk) | **30.888 KB** (~30,16 MB) | **~13,28× más memoria** | 1,42 s |
+| **`rlox` (Register VM)** | Rust (Bytecode de 3 direcciones) | **2.544 KB** (~2,48 MB) | **1,00× (Base más baja)** | 0,01 s |
+| **`rlox` (Stack VM `-O2`)** | Rust (Bytecode de pila optimizado) | **2.772 KB** (~2,71 MB) | 1,09× | 0,01 s |
+| **`rlox` (Stack VM `-O0`)** | Rust (Bytecode de pila sin opt.) | **2.772 KB** (~2,71 MB) | 1,09× | 0,02 s |
+| **`rlox` (Tree-Walk)** | Rust (Recorrido de AST) | **10.928 KB** (~10,67 MB) | 4,29× | 0,08 s |
+| **`ploxb`** | Python 3 (Bytecode VM / `fns-and-closures`) | **29.916 KB** (~29,21 MB) | 11,76× | 2,43 s |
+| **`plox`** | Python 3 (Tree-Walk) | **31.976 KB** (~31,23 MB) | 12,57× | 1,49 s |
+
+> Nota: cada cifra es el pico de una sola corrida y las tres fases se miden juntas, así que la tabla muestra órdenes de magnitud y no una curva de crecimiento. 
 
 ### Conclusiones
 
-- **Rust vs. Python (~13× menos memoria):** Todos los backends de `rlox` consumen apenas **~2,3 MB** frente a los **~30 MB** de `plox` y `ploxb`. Esto refleja la ausencia de un runtime pesado y que los primitivos en `rlox` (`f64`, `bool`) no requieren reservas en el heap, a diferencia de los objetos `PyObject` de CPython.
-- **Paridad entre backends de `rlox`:** La memoria entre Tree-Walk, VM de pila y VM de registros es casi idéntica (< 5% de diferencia). La compilación a bytecode lineal no introduce sobrecarga de memoria frente al AST.
+- **VMs de `rlox` (~2,5 a 2,7 MB):** No acumulan memoria tras 10.000 closures y bloques, lo que confirma que las variables se desapilan al salir de ámbito y que los *upvalues* se cierran adecuadamente.
+- **Tree-Walk (~10,9 MB):** Consume unas 4 veces más que las VMs. La causa probable son las referencias de `Rc` entre el entorno y la función de cada closure, que retienen memoria en el heap.
+- **`plox` y `ploxb` (~30 MB):** La diferencia frente a `rlox` se debe casi en su totalidad al costo base de arranque del intérprete CPython, por lo que refleja el peso del runtime y no una fuga en el programa.
 
 ## Limitaciones
 
